@@ -160,3 +160,9 @@ Verified locally on May 1, 2026 with OpenSearch 3.3.0:
 - `uv run openlens-index` indexed 19 documents into `openlens_multimodal`.
 - `uv run openlens-smoke --query "satellite imagery climate change" --top-k 5` used the OpenSearch hybrid path.
 - `POST /api/ingest` inserted a live document and a follow-up search returned it as the top hit.
+- `uv run openlens-build --bulk-internet-archive --target-docs 10000 --ia-page-size 1000` fetched exactly 10,000 public records: 2,375 each for IA text/PDF-like records, images, videos, audio records, plus 500 NASA table rows.
+- `uv run openlens-index` embedded and indexed those 10,000 records into `openlens_multimodal`.
+- `uv run openlens-smoke --query "public domain video spacewalk" --mode lir --top-k 5` used the OpenSearch LIR path.
+- Browser verification showed the LIR tab, patch trail, and `10000 docs on OpenSearch`.
+
+See `docs/verification-2026-05-01.md` for the exact 10k run log and distribution.
