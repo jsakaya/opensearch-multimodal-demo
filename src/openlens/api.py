@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -114,6 +114,10 @@ def status() -> dict[str, Any]:
         "vector_dim": settings.vector_dim,
         "embedding_backend": settings.embedding_backend,
         "qwen_model": settings.qwen_model,
+        "qwen_batch_size": settings.qwen_batch_size,
+        "qwen_max_frames": settings.qwen_max_frames,
+        "qwen_fps": settings.qwen_fps,
+        "require_opensearch": settings.require_opensearch,
     }
 
 
@@ -126,9 +130,10 @@ def examples() -> dict[str, Any]:
             "public domain videos of scientific archives",
             "archival audio recordings about civil rights speeches",
             "transit method exoplanet rows",
+            "SELECT title, body FROM openlens WHERE modality = 'table' LIMIT 5",
             "glacier retreat images",
         ],
-        "modes": ["hybrid", "keyword", "vector", "lir"],
+        "modes": ["hybrid", "keyword", "vector", "lir", "sql"],
         "modalities": ["image", "pdf", "document", "video", "audio", "table"],
     }
 
@@ -141,9 +146,11 @@ def search(
     candidate_k: int = Query(80, ge=10, le=500),
     modality: str | None = None,
     source: str | None = None,
-    prefer_opensearch: bool = True,
 ) -> dict[str, Any]:
-    retriever = cached_retriever(prefer_opensearch)
+    try:
+        retriever = cached_retriever(True)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return retriever.search(
         q,
         mode=mode,
@@ -158,21 +165,28 @@ def search(
 def ingest(req: InlineIngestRequest, prefer_opensearch: bool = True) -> dict[str, Any]:
     settings = get_settings()
     record = inline_request_to_record(req)
-    embedder = make_embedder(settings.embedding_backend, settings.vector_dim, settings.qwen_model)
+    embedder = make_embedder(
+        settings.embedding_backend,
+        settings.vector_dim,
+        settings.qwen_model,
+        batch_size=settings.qwen_batch_size,
+        max_frames=settings.qwen_max_frames,
+        fps=settings.qwen_fps,
+    )
     indexed = prepare_record(record, embedder)
 
     append_or_replace_jsonl(settings.docs_path, [record.model_dump(mode="json")])
     append_or_replace_jsonl(settings.embedded_docs_path, [indexed.model_dump(mode="json")])
 
     os_status = check_status(settings)
-    indexed_to = "local-jsonl"
-    if prefer_opensearch and os_status.available:
-        client = make_client(settings)
-        if not client.indices.exists(index=settings.opensearch_index):
-            recreate_index(client, settings.opensearch_index, settings.vector_dim)
-        bulk_index(client, settings.opensearch_index, [indexed], refresh="wait_for")
-        indexed_to = "opensearch"
-        os_status = check_status(settings)
+    if not os_status.available:
+        raise HTTPException(status_code=503, detail=f"OpenSearch is required for ingest: {os_status.detail}")
+    client = make_client(settings)
+    if not client.indices.exists(index=settings.opensearch_index):
+        recreate_index(client, settings.opensearch_index, settings.vector_dim)
+    bulk_index(client, settings.opensearch_index, [indexed], refresh="wait_for")
+    indexed_to = "opensearch"
+    os_status = check_status(settings)
 
     reset_retriever_cache()
     return {

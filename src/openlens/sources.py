@@ -157,6 +157,76 @@ class OpenSourceClient:
             )
         return records
 
+    def nasa_media(
+        self,
+        query: str = "artemis moon mars earth exoplanet",
+        media_type: str = "image",
+        limit: int = 8,
+        page_size: int = 100,
+    ) -> list[OpenRecord]:
+        modality = {"image": "image", "video": "video", "audio": "audio"}[media_type]
+        records: list[OpenRecord] = []
+        page = 1
+        while len(records) < limit:
+            payload = self.client.get(
+                "https://images-api.nasa.gov/search",
+                params={
+                    "q": query,
+                    "media_type": media_type,
+                    "page": page,
+                    "page_size": min(page_size, limit - len(records)),
+                },
+            ).json()
+            items = payload.get("collection", {}).get("items", [])
+            if not items:
+                break
+            for item in items:
+                row = (item.get("data") or [{}])[0]
+                nasa_id = clean_text(row.get("nasa_id"))
+                title = clean_text(row.get("title") or nasa_id)
+                if not nasa_id or not title:
+                    continue
+                description = clean_text(row.get("description"), max_chars=2400)
+                keywords = _as_list(row.get("keywords"))
+                links = item.get("links") or []
+                thumbnail = next((link.get("href") for link in links if link.get("href")), "")
+                records.append(
+                    OpenRecord(
+                        doc_id="nasa-media-" + stable_id(media_type, nasa_id),
+                        source="NASA Image and Video Library",
+                        source_id=nasa_id,
+                        source_url=f"https://images.nasa.gov/details/{nasa_id}",
+                        modality=modality,  # type: ignore[arg-type]
+                        title=title,
+                        summary=description,
+                        body=description,
+                        license="NASA media guidelines",
+                        license_url="https://www.nasa.gov/multimedia/guidelines/index.html",
+                        attribution=clean_text(row.get("center")) or "NASA",
+                        language="en",
+                        published_at=clean_text(row.get("date_created")) or None,
+                        tags=[modality, "nasa", media_type, *keywords[:12]],
+                        facets={
+                            "center": row.get("center"),
+                            "media_type": media_type,
+                            "keywords": keywords[:20],
+                            "secondary_creator": row.get("secondary_creator"),
+                        },
+                        assets=[
+                            Asset(
+                                kind=media_type,
+                                url=item.get("href") or f"https://images.nasa.gov/details/{nasa_id}",
+                                thumbnail_url=thumbnail,
+                                mime_type=f"{media_type}/*",
+                            )
+                        ],
+                    )
+                )
+                if len(records) >= limit:
+                    break
+            page += 1
+        return records
+
     def internet_archive_videos(self, query: str = DEFAULT_QUERY, limit: int = 8) -> list[OpenRecord]:
         return self.internet_archive_media("movies", "video", query=query, limit=limit)
 

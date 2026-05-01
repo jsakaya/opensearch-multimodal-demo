@@ -14,14 +14,18 @@ The image is for GPU encoding jobs:
 source /opt/activate-openlens.sh
 cd /workspace/opensearch
 OPENLENS_EMBEDDING_BACKEND=qwen \
-OPENLENS_QWEN_MODEL=qwen2b \
-OPENLENS_VECTOR_DIM=768 \
+OPENLENS_QWEN_MODEL=qwen8b \
+OPENLENS_VECTOR_DIM=4096 \
+OPENLENS_QWEN_BATCH_SIZE=16 \
+OPENLENS_QWEN_MAX_FRAMES=64 \
 openlens-index --skip-opensearch
 ```
 
-For a larger Qwen model, set `OPENLENS_QWEN_MODEL=qwen8b` or a local/HF model path
-that exposes the Qwen3-VL embedding interface. A Qwen3.5-compatible path can be
-used the same way once the processor/model class is available in Transformers.
+The H100 target is `Qwen/Qwen3-VL-Embedding-8B` at the full 4096-dimensional
+embedding size. Run `openlens-qwen-benchmark --model qwen8b --dimension 4096
+--max-frames 64 --max-batch 64` in the pod to find the largest stable batch
+size for the exact GPU and media mix. A Qwen3.5-compatible path can be used the
+same way once the processor/model class is available in Transformers.
 
 Published image target:
 

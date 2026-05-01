@@ -158,7 +158,7 @@ textarea:focus {
 
 .mode-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 68px);
+  grid-template-columns: repeat(5, 62px);
   gap: 6px;
 }
 
@@ -565,7 +565,7 @@ textarea:focus {
   }
 
   .mode-tabs {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .workspace {

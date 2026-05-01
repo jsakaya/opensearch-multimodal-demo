@@ -158,7 +158,14 @@ def embed_and_optionally_index(
     recreate: bool = True,
     skip_opensearch: bool = False,
 ) -> tuple[list[IndexedRecord], OpenSearchStatus]:
-    embedder = make_embedder(settings.embedding_backend, settings.vector_dim, settings.qwen_model)
+    embedder = make_embedder(
+        settings.embedding_backend,
+        settings.vector_dim,
+        settings.qwen_model,
+        batch_size=settings.qwen_batch_size,
+        max_frames=settings.qwen_max_frames,
+        fps=settings.qwen_fps,
+    )
     indexed = prepare_records(records, embedder)
     write_jsonl(settings.embedded_docs_path, [record.model_dump(mode="json") for record in indexed])
     if skip_opensearch:

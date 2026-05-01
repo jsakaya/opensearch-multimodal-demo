@@ -33,6 +33,7 @@ class QwenMultimodalEmbedder(FeatureHashEmbedder):
         self,
         model_name: str = "qwen2b",
         dimension: int = 768,
+        batch_size: int = 1,
         max_frames: int = 32,
         fps: float = 1.0,
     ):
@@ -40,6 +41,7 @@ class QwenMultimodalEmbedder(FeatureHashEmbedder):
         self.backend = "qwen"
         self.model_name = MODEL_ALIASES.get(model_name, model_name)
         self.dimension = int(dimension)
+        self.batch_size = max(1, int(batch_size))
         self.max_frames = int(max_frames)
         self.fps = float(fps)
         self._model = None
@@ -108,6 +110,12 @@ class QwenMultimodalEmbedder(FeatureHashEmbedder):
         return hidden_state[row, col]
 
     def _encode_objects(self, objects: list[dict[str, Any]], instruction: str) -> list[list[float]]:
+        results: list[list[float]] = []
+        for start in range(0, len(objects), self.batch_size):
+            results.extend(self._encode_batch(objects[start : start + self.batch_size], instruction))
+        return results
+
+    def _encode_batch(self, objects: list[dict[str, Any]], instruction: str) -> list[list[float]]:
         self._load_model()
         import torch
         import torch.nn.functional as F
@@ -221,7 +229,20 @@ def _media_path(value: str) -> str:
     return "file://" + str(path.resolve())
 
 
-def make_embedder(backend: str, dimension: int, model_name: str = "") -> FeatureHashEmbedder:
+def make_embedder(
+    backend: str,
+    dimension: int,
+    model_name: str = "",
+    batch_size: int = 1,
+    max_frames: int = 32,
+    fps: float = 1.0,
+) -> FeatureHashEmbedder:
     if backend == "qwen":
-        return QwenMultimodalEmbedder(model_name=model_name or "qwen2b", dimension=dimension)
+        return QwenMultimodalEmbedder(
+            model_name=model_name or "qwen8b",
+            dimension=dimension,
+            batch_size=batch_size,
+            max_frames=max_frames,
+            fps=fps,
+        )
     return FeatureHashEmbedder(dimension=dimension)

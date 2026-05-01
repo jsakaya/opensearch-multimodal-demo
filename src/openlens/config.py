@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -22,15 +23,21 @@ def load_project_env() -> None:
 @dataclass(frozen=True)
 class Settings:
     root: Path = ROOT
-    opensearch_url: str = os.getenv("OPENSEARCH_URL", "http://localhost:9200")
-    opensearch_index: str = os.getenv("OPENSEARCH_INDEX", "openlens_multimodal")
-    opensearch_timeout_s: float = float(os.getenv("OPENSEARCH_TIMEOUT_S", "30"))
-    vector_dim: int = int(os.getenv("OPENLENS_VECTOR_DIM", "384"))
-    embedding_backend: str = os.getenv("OPENLENS_EMBEDDING_BACKEND", "feature-hash")
-    qwen_model: str = os.getenv("OPENLENS_QWEN_MODEL", "qwen2b")
-    docs_path: Path = _path_from_env("OPENLENS_DOCS", "data/processed/open_corpus.jsonl")
-    embedded_docs_path: Path = _path_from_env("OPENLENS_EMBEDDED_DOCS", "data/processed/open_corpus_embedded.jsonl")
-    user_agent: str = os.getenv("OPENLENS_USER_AGENT", "openlens-opensearch-demo/0.1")
+    opensearch_url: str = field(default_factory=lambda: os.getenv("OPENSEARCH_URL", "http://localhost:9200"))
+    opensearch_index: str = field(default_factory=lambda: os.getenv("OPENSEARCH_INDEX", "openlens_multimodal"))
+    opensearch_timeout_s: float = field(default_factory=lambda: float(os.getenv("OPENSEARCH_TIMEOUT_S", "30")))
+    vector_dim: int = field(default_factory=lambda: int(os.getenv("OPENLENS_VECTOR_DIM", "384")))
+    embedding_backend: str = field(default_factory=lambda: os.getenv("OPENLENS_EMBEDDING_BACKEND", "feature-hash"))
+    qwen_model: str = field(default_factory=lambda: os.getenv("OPENLENS_QWEN_MODEL", "qwen8b"))
+    qwen_batch_size: int = field(default_factory=lambda: int(os.getenv("OPENLENS_QWEN_BATCH_SIZE", "1")))
+    qwen_max_frames: int = field(default_factory=lambda: int(os.getenv("OPENLENS_QWEN_MAX_FRAMES", "32")))
+    qwen_fps: float = field(default_factory=lambda: float(os.getenv("OPENLENS_QWEN_FPS", "1.0")))
+    require_opensearch: bool = field(default_factory=lambda: os.getenv("OPENLENS_REQUIRE_OPENSEARCH", "1") != "0")
+    docs_path: Path = field(default_factory=lambda: _path_from_env("OPENLENS_DOCS", "data/processed/open_corpus.jsonl"))
+    embedded_docs_path: Path = field(
+        default_factory=lambda: _path_from_env("OPENLENS_EMBEDDED_DOCS", "data/processed/open_corpus_embedded.jsonl")
+    )
+    user_agent: str = field(default_factory=lambda: os.getenv("OPENLENS_USER_AGENT", "openlens-opensearch-demo/0.1"))
 
 
 def get_settings() -> Settings:

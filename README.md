@@ -50,6 +50,16 @@ Build the 10,000-record multimodal corpus:
 uv run openlens-build --bulk-internet-archive --target-docs 10000 --ia-page-size 1000
 ```
 
+Build a more customer-friendly NASA/space corpus with images, videos, audio,
+PDF-like papers, and SQL-style exoplanet rows:
+
+```bash
+uv run openlens-build \
+  --customer-demo-space \
+  --target-docs 10000 \
+  --query "artemis moon mars earth exoplanet"
+```
+
 Optionally extract first pages from arXiv PDFs:
 
 ```bash
@@ -124,11 +134,16 @@ With OpenSearch available, the API writes the record to JSONL for replay, indexe
 
 ## Qwen / RunPod Encoder
 
-For GPU-native multimodal encoding:
+For the best GPU-native multimodal encoding on H100:
 
 ```bash
 uv sync --extra qwen
-OPENLENS_EMBEDDING_BACKEND=qwen OPENLENS_QWEN_MODEL=qwen2b OPENLENS_VECTOR_DIM=768 uv run openlens-index
+OPENLENS_EMBEDDING_BACKEND=qwen \
+OPENLENS_QWEN_MODEL=qwen8b \
+OPENLENS_VECTOR_DIM=4096 \
+OPENLENS_QWEN_BATCH_SIZE=16 \
+OPENLENS_QWEN_MAX_FRAMES=64 \
+uv run openlens-index
 ```
 
 The optional RunPod image lives in `docker/runpod-openlens-qwen-encoder/` and mirrors the QuickInsights Qwen3.5 fast-path setup:
@@ -144,7 +159,17 @@ Inside the pod:
 ```bash
 source /opt/activate-openlens.sh
 cd /workspace/opensearch
-OPENLENS_EMBEDDING_BACKEND=qwen OPENLENS_QWEN_MODEL=qwen2b OPENLENS_VECTOR_DIM=768 openlens-index --skip-opensearch
+openlens-qwen-benchmark --model qwen8b --dimension 4096 --max-frames 64 --max-batch 64
+OPENLENS_EMBEDDING_BACKEND=qwen OPENLENS_QWEN_MODEL=qwen8b OPENLENS_VECTOR_DIM=4096 openlens-index --skip-opensearch
+```
+
+OpenLens search APIs require OpenSearch by default (`OPENLENS_REQUIRE_OPENSEARCH=1`).
+SQL/table retrieval is also OpenSearch-native through `_plugins/_sql`:
+
+```bash
+uv run openlens-smoke \
+  --mode sql \
+  --query "SELECT modality, COUNT(*) AS n FROM openlens GROUP BY modality"
 ```
 
 ## Validation

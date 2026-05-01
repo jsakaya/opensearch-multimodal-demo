@@ -11,7 +11,7 @@ from openlens.retrieval import make_retriever
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a retrieval smoke test against OpenLens.")
     parser.add_argument("--query", default="satellite images of earth climate change")
-    parser.add_argument("--mode", choices=["hybrid", "keyword", "vector", "lir"], default="hybrid")
+    parser.add_argument("--mode", choices=["hybrid", "keyword", "vector", "lir", "sql"], default="hybrid")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--local", action="store_true")
     args = parser.parse_args()

@@ -17,7 +17,7 @@ from .qwen_embedder import make_embedder
 from .text import excerpt_for
 
 
-SearchMode = Literal["hybrid", "keyword", "vector", "lir"]
+SearchMode = Literal["hybrid", "keyword", "vector", "lir", "sql"]
 
 
 @dataclass
@@ -118,7 +118,14 @@ def facet_counts(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
 class LocalRetriever:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.embedder = make_embedder(settings.embedding_backend, settings.vector_dim, settings.qwen_model)
+        self.embedder = make_embedder(
+            settings.embedding_backend,
+            settings.vector_dim,
+            settings.qwen_model,
+            batch_size=settings.qwen_batch_size,
+            max_frames=settings.qwen_max_frames,
+            fps=settings.qwen_fps,
+        )
         path = settings.embedded_docs_path if settings.embedded_docs_path.exists() else settings.docs_path
         rows = read_jsonl(path)
         self.docs: list[dict[str, Any]] = []
@@ -150,6 +157,11 @@ class LocalRetriever:
             hits = self._vector(query, docs, top_k)
         elif mode == "lir":
             hits = self._lir(query, docs, top_k, candidate_k)
+        elif mode == "sql":
+            hits = self._keyword(query, [doc for doc in docs if doc.get("modality") == "table"], top_k)
+            for hit in hits:
+                hit.method = "sql"
+                hit.components = {"sql": hit.score}
         else:
             hits = rrf_fuse(
                 [
@@ -250,7 +262,14 @@ class OpenSearchRetriever:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.client: OpenSearch = make_client(settings)
-        self.embedder = make_embedder(settings.embedding_backend, settings.vector_dim, settings.qwen_model)
+        self.embedder = make_embedder(
+            settings.embedding_backend,
+            settings.vector_dim,
+            settings.qwen_model,
+            batch_size=settings.qwen_batch_size,
+            max_frames=settings.qwen_max_frames,
+            fps=settings.qwen_fps,
+        )
 
     def search(
         self,
@@ -269,6 +288,8 @@ class OpenSearchRetriever:
             hits = self._vector(query, top_k, filters)
         elif mode == "lir":
             hits = self._lir(query, top_k, candidate_k, filters)
+        elif mode == "sql":
+            hits = self._sql(query, top_k, filters)
         else:
             hits = rrf_fuse([self._keyword(query, candidate_k, filters), self._vector(query, candidate_k, filters)], top_k)
         return SearchResponse(
@@ -319,6 +340,69 @@ class OpenSearchRetriever:
         body = {"size": top_k, "query": {"knn": {"vector": knn}}, "_source": {"excludes": ["vector", "patch_vectors"]}}
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "vector", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
+
+    def _sql(self, query: str, top_k: int, filters: list[dict[str, Any]]) -> list[SearchHit]:
+        table_filters = [*filters, {"term": {"modality": "table"}}]
+        if _is_sql_statement(query):
+            try:
+                return self._sql_plugin(query, top_k)
+            except Exception:
+                pass
+        body = {
+            "size": top_k,
+            "query": {
+                "bool": {
+                    "must": [
+                        {
+                            "multi_match": {
+                                "query": query,
+                                "fields": ["title^5", "summary^3", "body^2", "search_text", "tags^2"],
+                                "type": "best_fields",
+                            }
+                        }
+                    ],
+                    "filter": table_filters,
+                }
+            },
+            "highlight": {"fields": {"title": {}, "summary": {}, "body": {}, "search_text": {}}},
+            "_source": {"excludes": ["vector", "patch_vectors"]},
+        }
+        response = self.client.search(index=self.settings.opensearch_index, body=body)
+        return [self._hit_to_result(hit, rank, "sql", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
+
+    def _sql_plugin(self, query: str, top_k: int) -> list[SearchHit]:
+        sql = _rewrite_sql_index(query, self.settings.opensearch_index, top_k)
+        response = self.client.transport.perform_request(
+            "POST",
+            "/_plugins/_sql",
+            body={"query": sql},
+        )
+        columns = [column.get("alias") or column.get("name") for column in response.get("schema", [])]
+        hits: list[SearchHit] = []
+        for rank, row in enumerate(response.get("datarows", [])[:top_k], start=1):
+            table = dict(zip(columns, row, strict=False))
+            doc_id = f"sql-row-{rank}"
+            title = table.get("pl_name") or table.get("title") or table.get("doc_id") or f"SQL row {rank}"
+            doc = {
+                "doc_id": doc_id,
+                "source": "OpenSearch SQL",
+                "source_id": doc_id,
+                "source_url": "",
+                "modality": "table",
+                "title": str(title),
+                "summary": "OpenSearch SQL result row",
+                "license": "",
+                "tags": ["sql", "opensearch"],
+                "facets": {},
+                "table": table,
+                "assets": [],
+                "patches": [],
+                "patch_count": 0,
+                "embedding_backend": self.settings.embedding_backend,
+                "embedding_model": self.settings.qwen_model,
+            }
+            hits.append(SearchHit(doc_id, rank, 1.0 / rank, "sql", doc, str(table)[:360], {"sql": 1.0 / rank}))
+        return hits
 
     def _lir(self, query: str, top_k: int, candidate_k: int, filters: list[dict[str, Any]]) -> list[SearchHit]:
         query_vectors = self.embedder.embed_query_patches(query)
@@ -422,6 +506,8 @@ def make_retriever(settings: Settings, prefer_opensearch: bool = True) -> LocalR
     status = check_status(settings)
     if prefer_opensearch and status.available and status.doc_count > 0:
         return OpenSearchRetriever(settings)
+    if settings.require_opensearch:
+        raise RuntimeError(f"OpenSearch is required but unavailable: {status.detail}")
     return LocalRetriever(settings)
 
 
@@ -440,3 +526,17 @@ def best_patch_excerpt(query: str, doc: dict[str, Any]) -> str:
     elif best.get("page") is not None:
         label = f"{label} p{best['page']}"
     return f"{label}: {excerpt_for(query, best.get('text') or '')}"
+
+
+def _is_sql_statement(query: str) -> bool:
+    return query.strip().lower().startswith(("select ", "show ", "describe ", "explain "))
+
+
+def _rewrite_sql_index(query: str, index_name: str, top_k: int) -> str:
+    sql = query.strip().rstrip(";")
+    lowered = sql.lower()
+    if " from openlens " in f" {lowered} ":
+        sql = sql.replace(" openlens ", f" {index_name} ")
+    if " limit " not in lowered and lowered.startswith("select "):
+        sql = f"{sql} LIMIT {top_k}"
+    return sql

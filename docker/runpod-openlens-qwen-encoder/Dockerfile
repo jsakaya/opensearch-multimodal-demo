@@ -69,8 +69,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     XDG_CACHE_HOME=/workspace/.cache \
     UV_CACHE_DIR=/workspace/.cache/uv \
     OPENLENS_EMBEDDING_BACKEND=qwen \
-    OPENLENS_QWEN_MODEL=qwen2b \
-    OPENLENS_VECTOR_DIM=768
+    OPENLENS_QWEN_MODEL=qwen8b \
+    OPENLENS_VECTOR_DIM=4096 \
+    OPENLENS_QWEN_BATCH_SIZE=16 \
+    OPENLENS_QWEN_MAX_FRAMES=64 \
+    OPENLENS_QWEN_FPS=1.0 \
+    OPENLENS_REQUIRE_OPENSEARCH=1
 
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
