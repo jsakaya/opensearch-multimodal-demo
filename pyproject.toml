@@ -1,0 +1,45 @@
+[project]
+name = "openlens-opensearch-demo"
+version = "0.1.0"
+description = "Minimal multimodal OpenSearch demo over open images, PDFs, videos, documents, and SQL-style table rows."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "numpy>=2.0.0",
+    "opensearch-py>=2.8.0",
+    "pydantic>=2.10.0",
+    "pypdf>=5.3.0",
+    "python-dotenv>=1.0.1",
+    "rich>=13.9.0",
+    "scikit-learn>=1.6.0",
+    "uvicorn[standard]>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+openlens-api = "openlens.api:main"
+openlens-build = "openlens.scripts.build_open_corpus:main"
+openlens-index = "openlens.scripts.index_open_corpus:main"
+openlens-smoke = "openlens.scripts.smoke_demo:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openlens"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
