@@ -3,7 +3,7 @@ name = "openlens-opensearch-demo"
 version = "0.1.0"
 description = "Minimal multimodal OpenSearch demo over open images, PDFs, videos, documents, and SQL-style table rows."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.10,<3.14"
 dependencies = [
     "fastapi>=0.115.0",
     "httpx>=0.28.0",
@@ -46,7 +46,7 @@ packages = ["src/openlens"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py310"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -103,6 +103,7 @@ Open http://localhost:8787.
 
 ```bash
 curl http://localhost:8787/api/status
+curl -X POST http://localhost:8787/api/prewarm
 curl 'http://localhost:8787/api/search?q=satellite%20imagery%20climate%20change&mode=hybrid&top_k=5'
 curl 'http://localhost:8787/api/search?q=public%20domain%20video%20spacewalk&mode=lir&top_k=5'
 ```
@@ -154,13 +155,26 @@ The optional RunPod image lives in `docker/runpod-openlens-qwen-encoder/` and mi
 - Build-time `verify_openlens_qwen.py`.
 - GHCR workflow: `.github/workflows/build-runpod-openlens-qwen-encoder.yml`.
 
-Inside the pod:
+Full-power H100 demo path:
 
 ```bash
-source /opt/activate-openlens.sh
-cd /workspace/opensearch
-openlens-qwen-benchmark --model qwen8b --dimension 4096 --max-frames 64 --max-batch 64
-OPENLENS_EMBEDDING_BACKEND=qwen OPENLENS_QWEN_MODEL=qwen8b OPENLENS_VECTOR_DIM=4096 openlens-index --skip-opensearch
+export RUNPOD_API_KEY=...
+export RUNPOD_VOLUME_ID=...
+scripts/runpod/up.sh
+scripts/runpod/full-power-demo.sh
+```
+
+`full-power-demo.sh` SSHes into the H100 pod, starts a single-node OpenSearch
+3.3 service if `OPENSEARCH_URL` is not already reachable, autotunes the Qwen
+batch size up to `OPENLENS_QWEN_MAX_BATCH=64`, builds the 10k NASA/space corpus,
+indexes full 4096-dimensional Qwen vectors and patch vectors into OpenSearch,
+starts the API, calls `POST /api/prewarm`, and opens a local SSH tunnel. The
+browser URL prints as `http://127.0.0.1:8787`.
+
+Inside an already-running pod you can run the same remote sequence directly:
+
+```bash
+scripts/runpod/run.sh 'bash /opt/openlens/scripts/runpod/full-power-demo-remote.sh'
 ```
 
 OpenLens search APIs require OpenSearch by default (`OPENLENS_REQUIRE_OPENSEARCH=1`).

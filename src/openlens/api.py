@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from .config import get_settings
 from .data import append_or_replace_jsonl, stable_id
 from .indexer import bulk_index, check_status, make_client, prepare_record, recreate_index
 from .models import Asset, Modality, OpenRecord
-from .qwen_embedder import make_embedder
+from .qwen_embedder import QwenEmbedderError, make_embedder, qwen_runtime_status
 from .retrieval import LocalRetriever, OpenSearchRetriever, SearchMode, make_retriever
 from .text import clean_text
 
@@ -117,7 +118,34 @@ def status() -> dict[str, Any]:
         "qwen_batch_size": settings.qwen_batch_size,
         "qwen_max_frames": settings.qwen_max_frames,
         "qwen_fps": settings.qwen_fps,
+        "qwen_runtime": qwen_runtime_status(),
         "require_opensearch": settings.require_opensearch,
+    }
+
+
+@app.post("/api/prewarm")
+def prewarm() -> dict[str, Any]:
+    settings = get_settings()
+    started = time.perf_counter()
+    try:
+        retriever = cached_retriever(True)
+        query_vectors = retriever.embedder.embed_query_patches(
+            "warm up Qwen multimodal retrieval for OpenSearch hybrid vector LIR search"
+        )
+    except (RuntimeError, QwenEmbedderError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    vector_dim = len(query_vectors[0]) if query_vectors else 0
+    return {
+        "status": "ready",
+        "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+        "retriever": type(retriever).__name__,
+        "embedding_backend": settings.embedding_backend,
+        "embedding_model": settings.qwen_model if settings.embedding_backend == "qwen" else "feature-hash",
+        "vector_dim": vector_dim,
+        "query_vectors": len(query_vectors),
+        "qwen_batch_size": settings.qwen_batch_size,
+        "qwen_max_frames": settings.qwen_max_frames,
+        "qwen_runtime": qwen_runtime_status(),
     }
 
 

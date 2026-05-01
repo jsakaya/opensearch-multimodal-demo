@@ -20,6 +20,47 @@ class QwenEmbedderError(RuntimeError):
     pass
 
 
+def qwen_runtime_status() -> dict[str, Any]:
+    """Return lightweight Torch/CUDA state without loading a Qwen checkpoint."""
+    try:
+        import torch
+    except ImportError as exc:
+        return {
+            "torch_available": False,
+            "cuda_available": False,
+            "device": "unavailable",
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+    status: dict[str, Any] = {
+        "torch_available": True,
+        "torch_version": getattr(torch, "__version__", "unknown"),
+        "cuda_available": bool(torch.cuda.is_available()),
+        "device_count": int(torch.cuda.device_count()) if torch.cuda.is_available() else 0,
+    }
+    if torch.cuda.is_available():
+        device_id = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device_id)
+        free_bytes, total_bytes = torch.cuda.mem_get_info(device_id)
+        status.update(
+            {
+                "device": "cuda",
+                "current_device": int(device_id),
+                "device_name": torch.cuda.get_device_name(device_id),
+                "capability": f"{props.major}.{props.minor}",
+                "total_vram_gb": round(total_bytes / 1024**3, 2),
+                "free_vram_gb": round(free_bytes / 1024**3, 2),
+                "allocated_vram_gb": round(torch.cuda.memory_allocated(device_id) / 1024**3, 2),
+                "reserved_vram_gb": round(torch.cuda.memory_reserved(device_id) / 1024**3, 2),
+            }
+        )
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        status.update({"device": "mps"})
+    else:
+        status.update({"device": "cpu"})
+    return status
+
+
 class QwenMultimodalEmbedder(FeatureHashEmbedder):
     """Qwen multimodal embedding provider.
 
@@ -31,8 +72,8 @@ class QwenMultimodalEmbedder(FeatureHashEmbedder):
 
     def __init__(
         self,
-        model_name: str = "qwen2b",
-        dimension: int = 768,
+        model_name: str = "qwen8b",
+        dimension: int = 4096,
         batch_size: int = 1,
         max_frames: int = 32,
         fps: float = 1.0,

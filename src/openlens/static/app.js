@@ -54,10 +54,23 @@ async function loadStatus() {
     const payload = await api("/api/status");
     $("indexName").textContent = payload.index || "openlens_multimodal";
     const os = payload.opensearch || {};
-    $("statusLine").textContent = os.available ? `${os.doc_count || 0} docs on OpenSearch` : "local fallback";
+    $("statusLine").textContent = os.available
+      ? `${os.doc_count || 0} docs · ${embeddingLabel(payload)} · OpenSearch`
+      : "OpenSearch unavailable";
   } catch {
     $("statusLine").textContent = "status unavailable";
   }
+}
+
+function embeddingLabel(payload) {
+  const backend = payload.embedding_backend || "feature-hash";
+  const dim = payload.vector_dim ? `${payload.vector_dim}d` : "";
+  if (backend === "qwen") {
+    const runtime = payload.qwen_runtime || {};
+    const device = runtime.cuda_available ? runtime.device_name || "CUDA" : runtime.device || "no GPU";
+    return `${payload.qwen_model || "qwen"} ${dim} · ${device}`;
+  }
+  return `${backend} ${dim}`.trim();
 }
 
 async function loadExamples() {

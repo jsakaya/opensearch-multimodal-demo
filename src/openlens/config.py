@@ -16,6 +16,14 @@ def _path_from_env(name: str, default: str) -> Path:
     return value if value.is_absolute() else ROOT / value
 
 
+def _vector_dim_from_env() -> int:
+    if os.getenv("OPENLENS_VECTOR_DIM"):
+        return int(os.environ["OPENLENS_VECTOR_DIM"])
+    if os.getenv("OPENLENS_EMBEDDING_BACKEND") == "qwen":
+        return 4096
+    return 384
+
+
 def load_project_env() -> None:
     load_dotenv(ROOT / ".env")
 
@@ -26,7 +34,7 @@ class Settings:
     opensearch_url: str = field(default_factory=lambda: os.getenv("OPENSEARCH_URL", "http://localhost:9200"))
     opensearch_index: str = field(default_factory=lambda: os.getenv("OPENSEARCH_INDEX", "openlens_multimodal"))
     opensearch_timeout_s: float = field(default_factory=lambda: float(os.getenv("OPENSEARCH_TIMEOUT_S", "30")))
-    vector_dim: int = field(default_factory=lambda: int(os.getenv("OPENLENS_VECTOR_DIM", "384")))
+    vector_dim: int = field(default_factory=_vector_dim_from_env)
     embedding_backend: str = field(default_factory=lambda: os.getenv("OPENLENS_EMBEDDING_BACKEND", "feature-hash"))
     qwen_model: str = field(default_factory=lambda: os.getenv("OPENLENS_QWEN_MODEL", "qwen8b"))
     qwen_batch_size: int = field(default_factory=lambda: int(os.getenv("OPENLENS_QWEN_BATCH_SIZE", "1")))

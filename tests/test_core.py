@@ -8,6 +8,7 @@ from openlens.data import write_jsonl
 from openlens.embeddings import FeatureHashEmbedder, late_interaction_score
 from openlens.indexer import prepare_record
 from openlens.models import OpenRecord
+from openlens.qwen_embedder import qwen_runtime_status
 from openlens.retrieval import LocalRetriever, SearchHit, rrf_fuse
 from openlens.text import compose_search_text
 from openlens.video import expected_chunk_spans, is_still_frame_chunk
@@ -140,3 +141,16 @@ def test_sentry_style_video_chunk_helpers() -> None:
     assert [(span.start_s, span.end_s) for span in spans] == [(0.0, 30.0), (25.0, 55.0), (50.0, 65.0)]
     assert is_still_frame_chunk([1000, 1010, 990, 1005])
     assert not is_still_frame_chunk([1000, 1400, 850, 1600])
+
+
+def test_qwen_runtime_status_is_nonfatal_without_gpu() -> None:
+    status = qwen_runtime_status()
+    assert "torch_available" in status
+    assert "cuda_available" in status
+    assert "device" in status
+
+
+def test_qwen_defaults_to_full_embedding_dimension(monkeypatch) -> None:
+    monkeypatch.setenv("OPENLENS_EMBEDDING_BACKEND", "qwen")
+    monkeypatch.delenv("OPENLENS_VECTOR_DIM", raising=False)
+    assert Settings().vector_dim == 4096
