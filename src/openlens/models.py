@@ -75,6 +75,11 @@ class OpenRecord(BaseModel):
 class IndexedRecord(OpenRecord):
     search_text: str
     vector: list[float]
+    text_vector: list[float] = Field(default_factory=list)
+    table_vector: list[float] = Field(default_factory=list)
+    audio_vector: list[float] = Field(default_factory=list)
+    qwen_vector: list[float] = Field(default_factory=list)
+    pdf_vector: list[float] = Field(default_factory=list)
     patches: list[Patch] = Field(default_factory=list)
     patch_vectors: list[list[float]] = Field(default_factory=list)
     colbert_vectors: list[list[float]] = Field(default_factory=list)
@@ -82,4 +87,9 @@ class IndexedRecord(OpenRecord):
     patch_vector_count: int = 0
     embedding_backend: str = "feature-hash"
     embedding_model: str = "feature-hash"
+    embedding_models: dict[str, str] = Field(default_factory=dict)
+    primary_vector_field: str = "vector"
+    vector_fields: dict[str, int] = Field(default_factory=dict)
+    chunk_strategy: str = "generic"
+    encoder_plan: list[dict[str, Any]] = Field(default_factory=list)
     indexed_at: str

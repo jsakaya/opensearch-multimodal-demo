@@ -9,7 +9,7 @@ GPU only wakes when an explicit encoding job is submitted.
 - `make serverless-deploy` creates or updates a RunPod Serverless template and endpoint with `workersMin=0`.
 - The deploy command does not call `/run` or `/runsync`, so it should not start a worker.
 - `make serverless-smoke` is the explicit command that starts a worker for a one-record smoke job.
-- Defaults target cost-minded GPU stock first: `NVIDIA L4`, `NVIDIA A40`, `NVIDIA RTX A5000`, `NVIDIA RTX A6000`, `NVIDIA GeForce RTX 4090`, then `NVIDIA L40S`.
+- Defaults target smaller Qwen-capable stock first: `NVIDIA A40`, `NVIDIA L40S`, `NVIDIA RTX A6000`, `NVIDIA GeForce RTX 4090`, then `NVIDIA L4`.
 
 ## Commands
 
@@ -43,7 +43,7 @@ Small inline smoke:
 ```json
 {
   "input": {
-    "backend": "colpali",
+    "backend": "modality-router",
     "records": ["...OpenRecord objects..."],
     "return_records": true
   }
@@ -55,14 +55,15 @@ Large URL-based job:
 ```json
 {
   "input": {
-    "backend": "colpali",
+    "backend": "modality-router",
     "records_url": "https://signed.example/open_corpus.jsonl",
-    "output_url": "https://signed.example/open_corpus_colpali.jsonl",
+    "output_url": "https://signed.example/open_corpus_routed.jsonl",
     "return_records": false
   }
 }
 ```
 
 The output records preserve OpenLens fields plus `vector`, `patch_vectors`, and
-`colbert_vectors` for OpenSearch HNSW candidate retrieval and late-interaction
-reranking.
+modality-native fields such as `qwen_vector`, `audio_vector`, `pdf_vector`,
+`table_vector`, and `colbert_vectors` for OpenSearch HNSW candidate retrieval
+and late-interaction reranking.

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from .config import get_settings
 from .colpali_embedder import ColPaliEmbedderError, colpali_runtime_status
 from .data import append_or_replace_jsonl, stable_id
-from .indexer import bulk_index, check_status, make_client, prepare_record, recreate_index
+from .indexer import VECTOR_SOURCE_FIELDS, bulk_index, check_status, make_client, prepare_record, recreate_index
 from .models import Asset, Modality, OpenRecord
 from .qwen_embedder import QwenEmbedderError, make_embedder, qwen_runtime_status
 from .retrieval import LocalRetriever, OpenSearchRetriever, SearchMode, make_retriever
@@ -126,6 +126,7 @@ def status() -> dict[str, Any]:
         "colpali_max_pages": settings.colpali_max_pages,
         "colpali_max_patch_vectors": settings.colpali_max_patch_vectors,
         "colpali_runtime": colpali_runtime_status(),
+        "modality_routing": _modality_routing_status(settings),
         "require_opensearch": settings.require_opensearch,
     }
 
@@ -177,11 +178,27 @@ def examples() -> dict[str, Any]:
 
 
 def _embedding_model_label(settings: Any) -> str:
+    if settings.embedding_backend in {"modality-router", "modality", "routed"}:
+        return "qwen-video+clap-audio+colpali-docs+bge-text"
     if settings.embedding_backend == "qwen":
         return settings.qwen_model
     if settings.embedding_backend == "colpali":
         return settings.colpali_model
     return "feature-hash"
+
+
+def _modality_routing_status(settings: Any) -> dict[str, Any]:
+    return {
+        "enabled": settings.embedding_backend in {"modality-router", "modality", "routed"},
+        "fields": {
+            "text": "text_vector",
+            "table": "table_vector",
+            "audio": "audio_vector",
+            "image": "qwen_vector",
+            "video": "qwen_vector",
+            "pdf": "pdf_vector + colbert_vectors",
+        },
+    }
 
 
 @app.get("/api/search")
@@ -241,7 +258,7 @@ def ingest(req: InlineIngestRequest, prefer_opensearch: bool = True) -> dict[str
 
     reset_retriever_cache()
     return {
-        "record": indexed.model_dump(mode="json", exclude={"vector"}),
+        "record": indexed.model_dump(mode="json", exclude=set(VECTOR_SOURCE_FIELDS)),
         "indexed_to": indexed_to,
         "opensearch": os_status.__dict__,
     }

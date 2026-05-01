@@ -19,12 +19,16 @@ Checked with `runpodctl` on 2026-05-01 using the local Keychain credential
 
 ## GPU Choice
 
-Recommended default for this demo: `NVIDIA H200` in `US-CA-2`.
+Recommended default for smoke/setup: `NVIDIA A40`.
+
+Recommended full customer-demo target: `NVIDIA H200` in `US-CA-2`.
 
 Why:
 
-- It keeps the pod near the existing `US-CA-2` network volume.
-- It gives substantially more VRAM than H100 SXM for ColPali page/image
+- A40 is the cheaper first pass for making sure OpenSearch, corpus build,
+  routed schemas, and API plumbing work.
+- H200 keeps the pod near the existing `US-CA-2` network volume.
+- H200 gives substantially more VRAM than H100 SXM for ColPali page/image
   multi-vector encoding, Qwen embedding, and reranking batch size tuning.
 - `runpodctl datacenter list` showed `H200 SXM` available in `US-CA-2` while
   several H100/B200 options were low stock.
@@ -33,6 +37,12 @@ Why:
   H100/H200 is the least surprising production demo target.
 
 Override knobs:
+
+```bash
+RUNPOD_GPU_ID="NVIDIA A40" make pod-up
+```
+
+Full-power override:
 
 ```bash
 RUNPOD_GPU_ID="NVIDIA H200" \

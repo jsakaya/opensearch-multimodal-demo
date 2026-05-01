@@ -20,6 +20,8 @@ def _vector_dim_from_env() -> int:
     if os.getenv("OPENLENS_VECTOR_DIM"):
         return int(os.environ["OPENLENS_VECTOR_DIM"])
     backend = os.getenv("OPENLENS_EMBEDDING_BACKEND")
+    if backend in {"modality-router", "modality", "routed"}:
+        return 384
     if backend == "qwen":
         return 4096
     if backend == "colpali":
@@ -38,7 +40,7 @@ class Settings:
     opensearch_index: str = field(default_factory=lambda: os.getenv("OPENSEARCH_INDEX", "openlens_multimodal"))
     opensearch_timeout_s: float = field(default_factory=lambda: float(os.getenv("OPENSEARCH_TIMEOUT_S", "30")))
     vector_dim: int = field(default_factory=_vector_dim_from_env)
-    embedding_backend: str = field(default_factory=lambda: os.getenv("OPENLENS_EMBEDDING_BACKEND", "feature-hash"))
+    embedding_backend: str = field(default_factory=lambda: os.getenv("OPENLENS_EMBEDDING_BACKEND", "modality-router"))
     qwen_model: str = field(default_factory=lambda: os.getenv("OPENLENS_QWEN_MODEL", "qwen8b"))
     qwen_batch_size: int = field(default_factory=lambda: int(os.getenv("OPENLENS_QWEN_BATCH_SIZE", "1")))
     qwen_max_frames: int = field(default_factory=lambda: int(os.getenv("OPENLENS_QWEN_MAX_FRAMES", "32")))

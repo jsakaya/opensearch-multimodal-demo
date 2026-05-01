@@ -13,15 +13,21 @@ The image is for GPU encoding jobs:
 ```bash
 source /opt/activate-openlens.sh
 cd /workspace/opensearch
-OPENLENS_EMBEDDING_BACKEND=colpali \
+OPENLENS_EMBEDDING_BACKEND=modality-router \
+OPENLENS_USE_REAL_MODALITY_ENCODERS=1 \
 OPENLENS_COLPALI_MODEL=colpali-v1.3 \
-OPENLENS_VECTOR_DIM=128 \
+OPENLENS_VECTOR_DIM=384 \
 OPENLENS_COLPALI_BATCH_SIZE=4 \
 OPENLENS_COLPALI_MAX_PATCH_VECTORS=1024 \
 openlens-index --skip-opensearch
 ```
 
-The H100/H200 ColPali target is `vidore/colpali-v1.3-hf`: 128-dimensional
+The default H100/H200 target is now `OPENLENS_EMBEDDING_BACKEND=modality-router`
+with `OPENLENS_USE_REAL_MODALITY_ENCODERS=1`. It stores 384-dimensional common
+vectors plus Qwen image/video vectors, CLAP audio vectors, table/text vectors,
+and ColPali page/patch vectors in one OpenSearch schema.
+
+The standalone ColPali target is `vidore/colpali-v1.3-hf`: 128-dimensional
 multi-vectors stored as OpenSearch `colbert_vectors` plus mean-pooled HNSW
 vectors. Run `openlens-colpali-benchmark --model colpali-v1.3 --dimension 128
 --max-batch 16` in the pod to find the largest stable page batch size. The image

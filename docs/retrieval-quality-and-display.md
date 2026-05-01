@@ -55,6 +55,9 @@ Current implementation:
 - `audio_caption`
 - `audio_transcript_or_description`
 - `audio_asset_metadata`
+- `audio_vector` with a 512-dimensional CLAP-compatible contract; set
+  `OPENLENS_USE_REAL_MODALITY_ENCODERS=1` or `OPENLENS_USE_REAL_AUDIO_ENCODER=1`
+  on a GPU worker to use the real CLAP model when audio bytes are available.
 
 These patch types make audio search work with BM25, vector, hybrid, and LIR
 without pretending that Qwen-VL is raw-audio-native.

@@ -28,6 +28,8 @@ def _env_float(name: str, default: float) -> float:
 def _default_dimension(backend: str) -> int:
     if os.getenv("OPENLENS_VECTOR_DIM"):
         return int(os.environ["OPENLENS_VECTOR_DIM"])
+    if backend in {"modality-router", "modality", "routed"}:
+        return 384
     if backend == "qwen":
         return 4096
     if backend == "colpali":
@@ -147,7 +149,7 @@ def _get_embedder(payload: dict[str, Any]) -> Any:
 def runtime_status() -> dict[str, Any]:
     return {
         "ok": True,
-        "backend_default": os.getenv("OPENLENS_EMBEDDING_BACKEND", "colpali"),
+        "backend_default": os.getenv("OPENLENS_EMBEDDING_BACKEND", "modality-router"),
         "colpali": colpali_runtime_status(),
         "qwen": qwen_runtime_status(),
     }

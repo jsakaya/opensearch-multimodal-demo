@@ -15,9 +15,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     XDG_CACHE_HOME=/runpod-volume/.cache \
     UV_CACHE_DIR=/runpod-volume/.cache/uv \
     HF_HUB_DISABLE_XET=1 \
-    OPENLENS_EMBEDDING_BACKEND=colpali \
+    OPENLENS_EMBEDDING_BACKEND=modality-router \
+    OPENLENS_USE_REAL_MODALITY_ENCODERS=1 \
     OPENLENS_COLPALI_MODEL=colpali-v1.3 \
-    OPENLENS_VECTOR_DIM=128 \
+    OPENLENS_VECTOR_DIM=384 \
     OPENLENS_COLPALI_BATCH_SIZE=2 \
     OPENLENS_COLPALI_MAX_PAGES=1 \
     OPENLENS_COLPALI_MAX_PATCH_VECTORS=1024 \
@@ -48,7 +49,7 @@ RUN python3 -m venv "$VIRTUAL_ENV" && \
 COPY . /opt/openlens
 WORKDIR /opt/openlens
 
-RUN uv pip install --no-cache --upgrade -e "/opt/openlens[qwen,colpali]" "runpod>=1.7.9" && \
+RUN uv pip install --no-cache --upgrade -e "/opt/openlens[qwen,colpali,audio]" "runpod>=1.7.9" && \
     python -c "from openlens.serverless_encoder import encode_payload; status = encode_payload({'action': 'status'}); assert status['ok'] is True; print(status['backend_default'])"
 
 CMD ["python", "-u", "/opt/openlens/docker/runpod-openlens-encoder-serverless/handler.py"]

@@ -14,10 +14,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HF_HOME=/workspace/.cache/huggingface \
     XDG_CACHE_HOME=/workspace/.cache \
     UV_CACHE_DIR=/workspace/.cache/uv \
-    OPENLENS_EMBEDDING_BACKEND=colpali \
+    OPENLENS_EMBEDDING_BACKEND=modality-router \
+    OPENLENS_USE_REAL_MODALITY_ENCODERS=1 \
     OPENLENS_QWEN_MODEL=qwen8b \
     OPENLENS_COLPALI_MODEL=colpali-v1.3 \
-    OPENLENS_VECTOR_DIM=128 \
+    OPENLENS_VECTOR_DIM=384 \
     OPENLENS_COLPALI_BATCH_SIZE=4 \
     OPENLENS_COLPALI_MAX_PATCH_VECTORS=1024 \
     OPENLENS_QWEN_BATCH_SIZE=16 \
@@ -54,7 +55,7 @@ RUN python3 -m venv "$VIRTUAL_ENV" && \
 COPY . /opt/openlens
 WORKDIR /opt/openlens
 
-RUN uv pip install --no-cache --upgrade -e "/opt/openlens[qwen,colpali]" && \
+RUN uv pip install --no-cache --upgrade -e "/opt/openlens[qwen,colpali,audio]" && \
     cp docker/runpod-openlens-qwen-encoder/verify_openlens_qwen.py /opt/openlens/verify_openlens_qwen.py && \
     cp docker/runpod-openlens-qwen-encoder/runpod-start.sh /opt/openlens/runpod-start.sh && \
     chmod +x /opt/openlens/runpod-start.sh && \

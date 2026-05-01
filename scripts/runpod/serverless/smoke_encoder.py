@@ -73,7 +73,7 @@ def main() -> int:
     parser.add_argument("--endpoint-id", default=None)
     parser.add_argument("--docs", type=Path, default=ROOT / "data/processed/open_corpus.jsonl")
     parser.add_argument("--records", type=int, default=1)
-    parser.add_argument("--backend", default=os.getenv("OPENLENS_EMBEDDING_BACKEND", "colpali"))
+    parser.add_argument("--backend", default=os.getenv("OPENLENS_EMBEDDING_BACKEND", "modality-router"))
     parser.add_argument("--model", default=os.getenv("OPENLENS_COLPALI_MODEL", "colpali-v1.3"))
     parser.add_argument("--action", default="encode", choices=["encode", "status"])
     parser.add_argument("--full", action="store_true", help="Print full RunPod output, including returned vectors.")
@@ -143,6 +143,9 @@ def summarize_result(result: dict[str, Any]) -> dict[str, Any]:
             "patch_vector_count": first_record.get("patch_vector_count"),
             "vector_dim": len(first_record.get("vector") or []),
             "colbert_vectors": len(first_record.get("colbert_vectors") or []),
+            "primary_vector_field": first_record.get("primary_vector_field"),
+            "vector_fields": first_record.get("vector_fields") or {},
+            "chunk_strategy": first_record.get("chunk_strategy"),
         }
     if result.get("error"):
         summary["error"] = result.get("error")

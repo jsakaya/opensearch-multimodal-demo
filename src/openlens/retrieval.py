@@ -12,12 +12,24 @@ from .config import Settings
 from .data import read_jsonl
 from .embeddings import late_interaction_score, mean_pool
 from .indexer import check_status, make_client, prepare_record
+from .modality_embedder import modalities_for_vector_field, vector_field_for_modality
 from .models import OpenRecord
 from .qwen_embedder import make_embedder
 from .text import excerpt_for
 
 
 SearchMode = Literal["hybrid", "keyword", "vector", "lir", "sql"]
+ROUTED_BACKENDS = {"modality-router", "modality", "routed"}
+VECTOR_SOURCE_EXCLUDES = [
+    "vector",
+    "text_vector",
+    "table_vector",
+    "audio_vector",
+    "qwen_vector",
+    "pdf_vector",
+    "patch_vectors",
+    "colbert_vectors",
+]
 
 
 @dataclass
@@ -56,6 +68,11 @@ class SearchHit:
             "patch_vector_count": self.doc.get("patch_vector_count") or len(_late_vectors(self.doc, "patch_vectors")),
             "embedding_backend": self.doc.get("embedding_backend"),
             "embedding_model": self.doc.get("embedding_model"),
+            "embedding_models": self.doc.get("embedding_models") or {},
+            "primary_vector_field": self.doc.get("primary_vector_field") or "vector",
+            "vector_fields": self.doc.get("vector_fields") or {},
+            "chunk_strategy": self.doc.get("chunk_strategy") or "generic",
+            "encoder_plan": self.doc.get("encoder_plan") or [],
         }
 
 
@@ -160,9 +177,9 @@ class LocalRetriever:
         if mode == "keyword":
             hits = self._keyword(query, docs, top_k)
         elif mode == "vector":
-            hits = self._vector(query, docs, top_k)
+            hits = self._vector(query, docs, top_k, modality=modality)
         elif mode == "lir":
-            hits = self._lir(query, docs, top_k, candidate_k)
+            hits = self._lir(query, docs, top_k, candidate_k, modality=modality)
         elif mode == "sql":
             hits = self._keyword(query, [doc for doc in docs if doc.get("modality") == "table"], top_k)
             for hit in hits:
@@ -172,7 +189,7 @@ class LocalRetriever:
             hits = rrf_fuse(
                 [
                     self._keyword(query, docs, min(candidate_k, len(docs))),
-                    self._vector(query, docs, min(candidate_k, len(docs))),
+                    self._vector(query, docs, min(candidate_k, len(docs)), modality=modality),
                 ],
                 top_k=top_k,
             )
@@ -209,21 +226,39 @@ class LocalRetriever:
             hits.append(self._result(doc, rank, score, "keyword", query))
         return hits
 
-    def _vector(self, query: str, docs: list[dict[str, Any]], top_k: int) -> list[SearchHit]:
+    def _vector(
+        self,
+        query: str,
+        docs: list[dict[str, Any]],
+        top_k: int,
+        modality: str | None = None,
+    ) -> list[SearchHit]:
         if not docs:
             return []
-        q = np.asarray(self.embedder.embed_text(query), dtype=np.float32)
-        scores = [float(np.dot(q, np.asarray(doc.get("vector", []), dtype=np.float32))) for doc in docs]
+        vector_field = _local_vector_field(self.settings.embedding_backend, docs, modality)
+        q = np.asarray(_embed_query_for_field(self.embedder, query, vector_field), dtype=np.float32)
+        scores = [_dot_or_floor(q, _doc_vector(doc, vector_field, q.shape[0])) for doc in docs]
         order = np.argsort(np.asarray(scores))[::-1][:top_k]
-        return [self._result(docs[int(i)], rank, float(scores[int(i)]), "vector", query) for rank, i in enumerate(order, start=1)]
+        return [
+            self._result(docs[int(i)], rank, float(scores[int(i)]), "vector", query)
+            for rank, i in enumerate(order, start=1)
+            if scores[int(i)] > -1e11
+        ]
 
-    def _lir(self, query: str, docs: list[dict[str, Any]], top_k: int, candidate_k: int) -> list[SearchHit]:
+    def _lir(
+        self,
+        query: str,
+        docs: list[dict[str, Any]],
+        top_k: int,
+        candidate_k: int,
+        modality: str | None = None,
+    ) -> list[SearchHit]:
         if not docs:
             return []
         candidates = rrf_fuse(
             [
                 self._keyword(query, docs, min(candidate_k, len(docs))),
-                self._vector(query, docs, min(candidate_k, len(docs))),
+                self._vector(query, docs, min(candidate_k, len(docs)), modality=modality),
             ],
             top_k=min(candidate_k, len(docs)),
         )
@@ -296,13 +331,19 @@ class OpenSearchRetriever:
         if mode == "keyword":
             hits = self._keyword(query, top_k, filters)
         elif mode == "vector":
-            hits = self._vector(query, top_k, filters)
+            hits = self._vector(query, top_k, filters, modality=modality)
         elif mode == "lir":
-            hits = self._lir(query, top_k, candidate_k, filters)
+            hits = self._lir(query, top_k, candidate_k, filters, modality=modality)
         elif mode == "sql":
             hits = self._sql(query, top_k, filters)
         else:
-            hits = rrf_fuse([self._keyword(query, candidate_k, filters), self._vector(query, candidate_k, filters)], top_k)
+            hits = rrf_fuse(
+                [
+                    self._keyword(query, candidate_k, filters),
+                    self._vector(query, candidate_k, filters, modality=modality),
+                ],
+                top_k,
+            )
         return SearchResponse(
             query=query,
             mode=mode,
@@ -338,20 +379,27 @@ class OpenSearchRetriever:
                 }
             },
             "highlight": {"fields": {"title": {}, "summary": {}, "body": {}, "search_text": {}}},
-            "_source": {"excludes": ["vector", "patch_vectors", "colbert_vectors"]},
+            "_source": {"excludes": VECTOR_SOURCE_EXCLUDES},
         }
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "keyword", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
 
-    def _vector(self, query: str, top_k: int, filters: list[dict[str, Any]]) -> list[SearchHit]:
-        vector = self.embedder.embed_text(query)
+    def _vector(
+        self,
+        query: str,
+        top_k: int,
+        filters: list[dict[str, Any]],
+        modality: str | None = None,
+    ) -> list[SearchHit]:
+        vector_field = _vector_search_field(self.settings.embedding_backend, modality)
+        vector = _embed_query_for_field(self.embedder, query, vector_field)
         knn: dict[str, Any] = {"vector": vector, "k": top_k}
         if filters:
             knn["filter"] = {"bool": {"filter": filters}}
         body = {
             "size": top_k,
-            "query": {"knn": {"vector": knn}},
-            "_source": {"excludes": ["vector", "patch_vectors", "colbert_vectors"]},
+            "query": {"knn": {vector_field: knn}},
+            "_source": {"excludes": VECTOR_SOURCE_EXCLUDES},
         }
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "vector", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
@@ -380,7 +428,7 @@ class OpenSearchRetriever:
                 }
             },
             "highlight": {"fields": {"title": {}, "summary": {}, "body": {}, "search_text": {}}},
-            "_source": {"excludes": ["vector", "patch_vectors", "colbert_vectors"]},
+            "_source": {"excludes": VECTOR_SOURCE_EXCLUDES},
         }
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "sql", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
@@ -421,14 +469,39 @@ class OpenSearchRetriever:
             hits.append(SearchHit(doc_id, rank, 1.0 / rank, "sql", doc, str(table)[:360], {"sql": 1.0 / rank}))
         return hits
 
-    def _lir(self, query: str, top_k: int, candidate_k: int, filters: list[dict[str, Any]]) -> list[SearchHit]:
+    def _lir(
+        self,
+        query: str,
+        top_k: int,
+        candidate_k: int,
+        filters: list[dict[str, Any]],
+        modality: str | None = None,
+    ) -> list[SearchHit]:
         query_vectors = self.embedder.embed_query_patches(query)
-        query_vector = mean_pool(query_vectors, self.embedder.dimension)
+        candidate_vector_field = _vector_search_field(self.settings.embedding_backend, modality)
+        query_vector = _embed_query_for_field(self.embedder, query, candidate_vector_field)
         vector_field = _late_vector_field(self.settings.embedding_backend)
         try:
-            return self._native_lir(query, query_vector, query_vectors, top_k, candidate_k, filters, vector_field)
+            return self._native_lir(
+                query,
+                query_vector,
+                query_vectors,
+                top_k,
+                candidate_k,
+                filters,
+                vector_field,
+                candidate_vector_field,
+            )
         except Exception:
-            return self._client_lir(query, query_vectors, top_k, candidate_k, filters, vector_field)
+            return self._client_lir(
+                query,
+                query_vectors,
+                top_k,
+                candidate_k,
+                filters,
+                vector_field,
+                modality=modality,
+            )
 
     def _native_lir(
         self,
@@ -439,13 +512,14 @@ class OpenSearchRetriever:
         candidate_k: int,
         filters: list[dict[str, Any]],
         vector_field: str,
+        candidate_vector_field: str,
     ) -> list[SearchHit]:
         knn: dict[str, Any] = {"vector": query_vector, "k": candidate_k}
         if filters:
             knn["filter"] = {"bool": {"filter": filters}}
         body = {
             "size": top_k,
-            "query": {"knn": {"vector": knn}},
+            "query": {"knn": {candidate_vector_field: knn}},
             "rescore": {
                 "window_size": candidate_k,
                 "query": {
@@ -462,7 +536,7 @@ class OpenSearchRetriever:
                     },
                 },
             },
-            "_source": {"excludes": ["vector", "patch_vectors", "colbert_vectors"]},
+            "_source": {"excludes": VECTOR_SOURCE_EXCLUDES},
         }
         response = self.client.search(index=self.settings.opensearch_index, body=body, request_timeout=120)
         return [self._hit_to_result(hit, rank, "lir", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
@@ -475,8 +549,15 @@ class OpenSearchRetriever:
         candidate_k: int,
         filters: list[dict[str, Any]],
         vector_field: str,
+        modality: str | None = None,
     ) -> list[SearchHit]:
-        candidates = rrf_fuse([self._keyword(query, candidate_k, filters), self._vector(query, candidate_k, filters)], candidate_k)
+        candidates = rrf_fuse(
+            [
+                self._keyword(query, candidate_k, filters),
+                self._vector(query, candidate_k, filters, modality=modality),
+            ],
+            candidate_k,
+        )
         ids = [hit.doc_id for hit in candidates]
         if not ids:
             return []
@@ -549,12 +630,50 @@ def best_patch_excerpt(query: str, doc: dict[str, Any]) -> str:
 
 
 def _late_vector_field(backend: str) -> str:
-    return "colbert_vectors" if backend == "colpali" else "patch_vectors"
+    return "colbert_vectors" if backend in {"colpali", *ROUTED_BACKENDS} else "patch_vectors"
 
 
 def _late_vectors(doc: dict[str, Any], preferred_field: str) -> list[list[float]]:
     vectors = doc.get(preferred_field) or doc.get("patch_vectors") or doc.get("colbert_vectors") or []
     return vectors if isinstance(vectors, list) else []
+
+
+def _vector_search_field(backend: str, modality: str | None) -> str:
+    if backend in ROUTED_BACKENDS:
+        return vector_field_for_modality(modality)
+    return "vector"
+
+
+def _local_vector_field(backend: str, docs: list[dict[str, Any]], modality: str | None) -> str:
+    vector_field = _vector_search_field(backend, modality)
+    if vector_field != "vector" and not any(doc.get(vector_field) for doc in docs):
+        return "vector"
+    return vector_field
+
+
+def _embed_query_for_field(embedder: Any, query: str, vector_field: str) -> list[float]:
+    if hasattr(embedder, "embed_query_for_field"):
+        return embedder.embed_query_for_field(query, vector_field)
+    if vector_field != "vector" and modalities_for_vector_field(vector_field):
+        return embedder.embed_text(f"{vector_field} {query}")
+    if vector_field == "pdf_vector":
+        return mean_pool(embedder.embed_query_patches(query), 128)
+    return embedder.embed_text(query)
+
+
+def _doc_vector(doc: dict[str, Any], vector_field: str, expected_dim: int) -> np.ndarray:
+    for field in [vector_field, "vector"]:
+        value = doc.get(field)
+        if not isinstance(value, list) or len(value) != expected_dim:
+            continue
+        return np.asarray(value, dtype=np.float32)
+    return np.asarray([], dtype=np.float32)
+
+
+def _dot_or_floor(query_vector: np.ndarray, doc_vector: np.ndarray) -> float:
+    if not len(query_vector) or len(query_vector) != len(doc_vector):
+        return -1e12
+    return float(np.dot(query_vector, doc_vector))
 
 
 def _is_sql_statement(query: str) -> bool:

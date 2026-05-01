@@ -8,14 +8,17 @@ export OPENLENS_DOCS="${OPENLENS_DOCS:-$OPENLENS_DATA_DIR/open_corpus.jsonl}"
 export OPENLENS_EMBEDDED_DOCS="${OPENLENS_EMBEDDED_DOCS:-$OPENLENS_DATA_DIR/open_corpus_embedded.jsonl}"
 export OPENSEARCH_URL="${OPENSEARCH_URL:-http://127.0.0.1:9200}"
 export OPENSEARCH_INDEX="${OPENSEARCH_INDEX:-openlens_multimodal}"
-export OPENLENS_EMBEDDING_BACKEND="${OPENLENS_EMBEDDING_BACKEND:-colpali}"
+export OPENLENS_EMBEDDING_BACKEND="${OPENLENS_EMBEDDING_BACKEND:-modality-router}"
+export OPENLENS_USE_REAL_MODALITY_ENCODERS="${OPENLENS_USE_REAL_MODALITY_ENCODERS:-1}"
 export OPENLENS_QWEN_MODEL="${OPENLENS_QWEN_MODEL:-qwen8b}"
 export OPENLENS_COLPALI_MODEL="${OPENLENS_COLPALI_MODEL:-colpali-v1.3}"
 if [[ -z "${OPENLENS_VECTOR_DIM:-}" ]]; then
   if [[ "$OPENLENS_EMBEDDING_BACKEND" == "qwen" ]]; then
     export OPENLENS_VECTOR_DIM=4096
-  else
+  elif [[ "$OPENLENS_EMBEDDING_BACKEND" == "colpali" ]]; then
     export OPENLENS_VECTOR_DIM=128
+  else
+    export OPENLENS_VECTOR_DIM=384
   fi
 fi
 export OPENLENS_COLPALI_BATCH_SIZE="${OPENLENS_COLPALI_BATCH_SIZE:-4}"
@@ -79,22 +82,29 @@ EOF
 }
 
 autotune_embedding() {
-  if [[ "$OPENLENS_EMBEDDING_BACKEND" == "colpali" ]]; then
+  if [[ "$OPENLENS_EMBEDDING_BACKEND" == "colpali" || "$OPENLENS_EMBEDDING_BACKEND" == "modality-router" ]]; then
     if [[ "${OPENLENS_AUTOTUNE_COLPALI:-1}" != "1" ]]; then
+      :
+    else
+      local log="$OPENLENS_DATA_DIR/colpali-benchmark.log"
+      local colpali_dim="$OPENLENS_VECTOR_DIM"
+      if [[ "$OPENLENS_EMBEDDING_BACKEND" == "modality-router" ]]; then
+        colpali_dim=128
+      fi
+      echo "autotuning ColPali batch size on the GPU..."
+      openlens-colpali-benchmark \
+        --model "$OPENLENS_COLPALI_MODEL" \
+        --dimension "$colpali_dim" \
+        --max-patch-vectors "$OPENLENS_COLPALI_MAX_PATCH_VECTORS" \
+        --max-batch "${OPENLENS_COLPALI_MAX_BATCH:-16}" | tee "$log"
+      local tuned
+      tuned="$(awk -F= '/OPENLENS_COLPALI_BATCH_SIZE=/{print $2}' "$log" | tail -1)"
+      export OPENLENS_COLPALI_BATCH_SIZE="${tuned:-$OPENLENS_COLPALI_BATCH_SIZE}"
+      echo "using OPENLENS_COLPALI_BATCH_SIZE=$OPENLENS_COLPALI_BATCH_SIZE"
+    fi
+    if [[ "$OPENLENS_EMBEDDING_BACKEND" == "colpali" ]]; then
       return
     fi
-    local log="$OPENLENS_DATA_DIR/colpali-benchmark.log"
-    echo "autotuning ColPali batch size on the GPU..."
-    openlens-colpali-benchmark \
-      --model "$OPENLENS_COLPALI_MODEL" \
-      --dimension "$OPENLENS_VECTOR_DIM" \
-      --max-patch-vectors "$OPENLENS_COLPALI_MAX_PATCH_VECTORS" \
-      --max-batch "${OPENLENS_COLPALI_MAX_BATCH:-16}" | tee "$log"
-    local tuned
-    tuned="$(awk -F= '/OPENLENS_COLPALI_BATCH_SIZE=/{print $2}' "$log" | tail -1)"
-    export OPENLENS_COLPALI_BATCH_SIZE="${tuned:-$OPENLENS_COLPALI_BATCH_SIZE}"
-    echo "using OPENLENS_COLPALI_BATCH_SIZE=$OPENLENS_COLPALI_BATCH_SIZE"
-    return
   fi
 
   if [[ "${OPENLENS_AUTOTUNE_QWEN:-1}" != "1" ]]; then
@@ -105,7 +115,7 @@ autotune_embedding() {
   echo "autotuning Qwen batch size on the GPU..."
   openlens-qwen-benchmark \
     --model "$OPENLENS_QWEN_MODEL" \
-    --dimension "$OPENLENS_VECTOR_DIM" \
+    --dimension 4096 \
     --max-frames "$OPENLENS_QWEN_MAX_FRAMES" \
     --max-batch "${OPENLENS_QWEN_MAX_BATCH:-64}" | tee "$log"
   local tuned

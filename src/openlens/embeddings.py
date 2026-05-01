@@ -253,5 +253,7 @@ def late_interaction_score(query_vectors: list[list[float]], doc_vectors: list[l
         return 0.0
     q = np.asarray(query_vectors, dtype=np.float32)
     d = np.asarray(doc_vectors, dtype=np.float32)
+    if q.ndim != 2 or d.ndim != 2 or q.shape[1] != d.shape[1]:
+        return 0.0
     sims = q @ d.T
     return float(sims.max(axis=1).sum())

@@ -5,15 +5,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../_common.sh"
 
 IMAGE="${IMAGE:-ghcr.io/jsakaya/openlens-encoder-serverless:latest}"
-TEMPLATE_NAME="${TEMPLATE_NAME:-openlens-colpali-encoder-serverless}"
-ENDPOINT_NAME="${ENDPOINT_NAME:-openlens-colpali-encoder}"
+TEMPLATE_NAME="${TEMPLATE_NAME:-openlens-modality-router-encoder-serverless}"
+ENDPOINT_NAME="${ENDPOINT_NAME:-openlens-modality-router-encoder}"
 CONTAINER_DISK_GB="${CONTAINER_DISK_GB:-80}"
 CONTAINER_REGISTRY_AUTH_ID="${CONTAINER_REGISTRY_AUTH_ID:-cmols3tco002dl707j9r6a08l}"
 WORKERS_MIN="${WORKERS_MIN:-0}"
 WORKERS_MAX="${WORKERS_MAX:-1}"
 IDLE_TIMEOUT_S="${IDLE_TIMEOUT_S:-5}"
 EXECUTION_TIMEOUT_MS="${EXECUTION_TIMEOUT_MS:-1800000}"
-GPU_CANDIDATES="${GPU_CANDIDATES:-[\"NVIDIA L4\",\"NVIDIA A40\",\"NVIDIA RTX A5000\",\"NVIDIA RTX A6000\",\"NVIDIA GeForce RTX 4090\",\"NVIDIA L40S\"]}"
+GPU_CANDIDATES="${GPU_CANDIDATES:-[\"NVIDIA A40\",\"NVIDIA L40S\",\"NVIDIA RTX A6000\",\"NVIDIA GeForce RTX 4090\",\"NVIDIA L4\"]}"
 
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 load_runpod_key
@@ -34,15 +34,16 @@ extract_id_or_die() {
 }
 
 TEMPLATE_ENV="$(jq -n \
-  --arg backend "${OPENLENS_EMBEDDING_BACKEND:-colpali}" \
+  --arg backend "${OPENLENS_EMBEDDING_BACKEND:-modality-router}" \
   --arg colpali_model "${OPENLENS_COLPALI_MODEL:-colpali-v1.3}" \
-  --arg vector_dim "${OPENLENS_VECTOR_DIM:-128}" \
+  --arg vector_dim "${OPENLENS_VECTOR_DIM:-384}" \
   --arg colpali_batch "${OPENLENS_COLPALI_BATCH_SIZE:-2}" \
   --arg colpali_pages "${OPENLENS_COLPALI_MAX_PAGES:-1}" \
   --arg colpali_patch_vectors "${OPENLENS_COLPALI_MAX_PATCH_VECTORS:-1024}" \
   --arg max_records "${OPENLENS_SERVERLESS_MAX_RECORDS:-10000}" \
   '{
     OPENLENS_EMBEDDING_BACKEND: $backend,
+    OPENLENS_USE_REAL_MODALITY_ENCODERS: "1",
     OPENLENS_COLPALI_MODEL: $colpali_model,
     OPENLENS_VECTOR_DIM: $vector_dim,
     OPENLENS_COLPALI_BATCH_SIZE: $colpali_batch,

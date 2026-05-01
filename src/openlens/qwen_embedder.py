@@ -283,6 +283,21 @@ def make_embedder(
     colpali_max_patch_vectors: int = 1024,
     colpali_image_timeout_s: float = 20,
 ) -> FeatureHashEmbedder:
+    if backend in {"modality-router", "modality", "routed"}:
+        from .modality_embedder import ModalityRouterEmbedder
+
+        return ModalityRouterEmbedder(
+            dimension=dimension,
+            qwen_model=model_name or "qwen8b",
+            qwen_batch_size=batch_size,
+            qwen_max_frames=max_frames,
+            qwen_fps=fps,
+            colpali_model=colpali_model or os.getenv("OPENLENS_COLPALI_MODEL", "colpali-v1.3"),
+            colpali_batch_size=colpali_batch_size,
+            colpali_max_pages=colpali_max_pages,
+            colpali_max_patch_vectors=colpali_max_patch_vectors,
+            colpali_image_timeout_s=colpali_image_timeout_s,
+        )
     if backend == "qwen":
         return QwenMultimodalEmbedder(
             model_name=model_name or "qwen8b",

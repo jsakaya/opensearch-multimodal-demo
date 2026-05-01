@@ -9,9 +9,19 @@ from opensearchpy import OpenSearch, helpers
 from .config import Settings
 from .data import utc_now, write_jsonl
 from .embeddings import FeatureHashEmbedder, mean_pool
-from .qwen_embedder import make_embedder
+from .modality_embedder import MODALITY_VECTOR_DIMS
 from .models import IndexedRecord, OpenRecord
+from .qwen_embedder import make_embedder
 from .text import compose_search_text
+
+VECTOR_SOURCE_FIELDS = [
+    "vector",
+    "text_vector",
+    "table_vector",
+    "audio_vector",
+    "qwen_vector",
+    "pdf_vector",
+]
 
 
 @dataclass(frozen=True)
@@ -48,6 +58,18 @@ def check_status(settings: Settings) -> OpenSearchStatus:
 
 
 def index_mapping(dimension: int) -> dict[str, Any]:
+    def knn_vector(vector_dimension: int) -> dict[str, Any]:
+        return {
+            "type": "knn_vector",
+            "dimension": vector_dimension,
+            "method": {
+                "name": "hnsw",
+                "engine": "lucene",
+                "space_type": "innerproduct",
+                "parameters": {"ef_construction": 128, "m": 24},
+            },
+        }
+
     return {
         "settings": {
             "index.knn": True,
@@ -87,6 +109,8 @@ def index_mapping(dimension: int) -> dict[str, Any]:
                 "patch_count": {"type": "integer"},
                 "embedding_backend": {"type": "keyword"},
                 "embedding_model": {"type": "keyword"},
+                "primary_vector_field": {"type": "keyword"},
+                "chunk_strategy": {"type": "keyword"},
                 "tags": {"type": "keyword"},
                 "facets": {"type": "object", "enabled": False},
                 "table": {"type": "object", "enabled": False},
@@ -94,23 +118,43 @@ def index_mapping(dimension: int) -> dict[str, Any]:
                 "patches": {"type": "object", "enabled": False},
                 "patch_vectors": {"type": "object", "enabled": False},
                 "colbert_vectors": {"type": "object", "enabled": False},
+                "embedding_models": {"type": "object", "enabled": False},
+                "vector_fields": {"type": "object", "enabled": False},
+                "encoder_plan": {"type": "object", "enabled": False},
                 "patch_vector_count": {"type": "integer"},
-                "vector": {
-                    "type": "knn_vector",
-                    "dimension": dimension,
-                    "method": {
-                        "name": "hnsw",
-                        "engine": "lucene",
-                        "space_type": "innerproduct",
-                        "parameters": {"ef_construction": 128, "m": 24},
-                    },
-                },
+                "vector": knn_vector(dimension),
+                **{field: knn_vector(field_dimension) for field, field_dimension in MODALITY_VECTOR_DIMS.items()},
             }
         },
     }
 
 
 def prepare_record(record: OpenRecord, embedder: FeatureHashEmbedder) -> IndexedRecord:
+    if hasattr(embedder, "prepare_indexed_record"):
+        patches, bundle = embedder.prepare_indexed_record(record)  # type: ignore[attr-defined]
+        return IndexedRecord(
+            **record.model_dump(),
+            search_text=compose_search_text(record),
+            vector=bundle.vector,
+            text_vector=bundle.text_vector,
+            table_vector=bundle.table_vector,
+            audio_vector=bundle.audio_vector,
+            qwen_vector=bundle.qwen_vector,
+            pdf_vector=bundle.pdf_vector,
+            patches=patches,
+            patch_vectors=bundle.patch_vectors,
+            colbert_vectors=bundle.colbert_vectors,
+            patch_count=len(patches),
+            patch_vector_count=len(bundle.colbert_vectors) or len(bundle.patch_vectors),
+            embedding_backend=getattr(embedder, "backend", "feature-hash"),
+            embedding_model=getattr(embedder, "model_name", "feature-hash"),
+            embedding_models=bundle.embedding_models,
+            primary_vector_field=bundle.primary_vector_field,
+            vector_fields=bundle.vector_fields,
+            chunk_strategy=bundle.chunk_strategy,
+            encoder_plan=bundle.encoder_plan,
+            indexed_at=utc_now(),
+        )
     patches = embedder.patch_record(record)
     patch_vectors = embedder.embed_patches(patches)
     vector = mean_pool(patch_vectors or [embedder.embed_record(record)], embedder.dimension)
@@ -125,6 +169,17 @@ def prepare_record(record: OpenRecord, embedder: FeatureHashEmbedder) -> Indexed
         patch_vector_count=len(patch_vectors),
         embedding_backend=getattr(embedder, "backend", "feature-hash"),
         embedding_model=getattr(embedder, "model_name", "feature-hash"),
+        primary_vector_field="vector",
+        vector_fields={"vector": len(vector)},
+        chunk_strategy="feature-hash-patches",
+        encoder_plan=[
+            {
+                "name": "feature_hash",
+                "field": "vector",
+                "model": getattr(embedder, "model_name", "feature-hash"),
+                "purpose": "portable local recall and smoke testing",
+            }
+        ],
         indexed_at=utc_now(),
     )
 
@@ -145,7 +200,7 @@ def bulk_index(client: OpenSearch, index_name: str, records: Iterable[IndexedRec
             "_op_type": "index",
             "_index": index_name,
             "_id": record.doc_id,
-            "_source": record.model_dump(mode="json"),
+            "_source": opensearch_source(record),
         }
         for record in records
     )
@@ -154,6 +209,15 @@ def bulk_index(client: OpenSearch, index_name: str, records: Iterable[IndexedRec
         if ok:
             successes += 1
     return successes
+
+
+def opensearch_source(record: IndexedRecord) -> dict[str, Any]:
+    source = record.model_dump(mode="json")
+    for field in VECTOR_SOURCE_FIELDS:
+        value = source.get(field)
+        if not isinstance(value, list) or not value:
+            source.pop(field, None)
+    return source
 
 
 def embed_and_optionally_index(

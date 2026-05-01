@@ -36,6 +36,12 @@ colpali = [
     "torch>=2.4.0; python_version < '3.13'",
     "transformers>=4.57.0",
 ]
+audio = [
+    "librosa>=0.10.2",
+    "soundfile>=0.12.1",
+    "torch>=2.4.0; python_version < '3.13'",
+    "transformers>=4.57.0",
+]
 
 [project.scripts]
 openlens-api = "openlens.api:main"

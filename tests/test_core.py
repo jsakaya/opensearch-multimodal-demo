@@ -6,7 +6,8 @@ from openlens.config import Settings
 from openlens.api import InlineIngestRequest, inline_request_to_record
 from openlens.data import write_jsonl
 from openlens.embeddings import FeatureHashEmbedder, late_interaction_score
-from openlens.indexer import prepare_record
+from openlens.indexer import opensearch_source, prepare_record
+from openlens.modality_embedder import ModalityRouterEmbedder
 from openlens.models import Asset, OpenRecord
 from openlens.qwen_embedder import qwen_runtime_status
 from openlens.retrieval import LocalRetriever, SearchHit, rrf_fuse
@@ -161,6 +162,58 @@ def test_colpali_defaults_to_late_interaction_dimension(monkeypatch) -> None:
     monkeypatch.setenv("OPENLENS_EMBEDDING_BACKEND", "colpali")
     monkeypatch.delenv("OPENLENS_VECTOR_DIM", raising=False)
     assert Settings().vector_dim == 128
+
+
+def test_modality_router_is_default_backend(monkeypatch) -> None:
+    monkeypatch.delenv("OPENLENS_EMBEDDING_BACKEND", raising=False)
+    monkeypatch.delenv("OPENLENS_VECTOR_DIM", raising=False)
+    settings = Settings()
+    assert settings.embedding_backend == "modality-router"
+    assert settings.vector_dim == 384
+
+
+def test_modality_router_populates_video_audio_pdf_table_fields() -> None:
+    embedder = ModalityRouterEmbedder()
+
+    video = make_record("vid-router", "Lunar rover traverse video", "A 60 second camera clip on the moon.", "video")
+    video.assets = [Asset(kind="video", url="https://example.test/rover.mp4", thumbnail_url="https://example.test/rover.jpg", duration_s=60)]
+    indexed_video = prepare_record(video, embedder)
+    assert indexed_video.primary_vector_field == "qwen_vector"
+    assert len(indexed_video.qwen_vector) == 4096
+    assert indexed_video.chunk_strategy.startswith("sentrysearch-video")
+    assert any(step["field"] == "qwen_vector" for step in indexed_video.encoder_plan)
+
+    audio = make_record("aud-router", "Mission control loop", "Controllers discuss orbit insertion.", "audio")
+    audio.assets = [Asset(kind="audio", url="https://example.test/loop.mp3", mime_type="audio/mpeg", duration_s=45)]
+    indexed_audio = prepare_record(audio, embedder)
+    assert indexed_audio.primary_vector_field == "audio_vector"
+    assert len(indexed_audio.audio_vector) == 512
+    assert any("CLAP" in step["model"] for step in indexed_audio.encoder_plan)
+
+    pdf = make_record("pdf-router", "Spacesuit thermal report", "Page one has a thermal chart.", "pdf")
+    pdf.assets = [Asset(kind="pdf", url="https://example.test/report.pdf", mime_type="application/pdf")]
+    indexed_pdf = prepare_record(pdf, embedder)
+    assert indexed_pdf.primary_vector_field == "pdf_vector"
+    assert len(indexed_pdf.pdf_vector) == 128
+    assert indexed_pdf.colbert_vectors
+    assert indexed_pdf.patch_vector_count == len(indexed_pdf.colbert_vectors)
+
+    table = make_record("tbl-router", "Kepler planet row", "SQL row for an exoplanet.", "table")
+    table.table = {"pl_name": "Kepler-22 b", "discoverymethod": "Transit"}
+    indexed_table = prepare_record(table, embedder)
+    assert indexed_table.primary_vector_field == "table_vector"
+    assert len(indexed_table.table_vector) == 384
+
+
+def test_opensearch_source_omits_empty_modality_vectors() -> None:
+    embedder = ModalityRouterEmbedder()
+    indexed = prepare_record(make_record("doc-router", "Plain report", "Text-only evidence.", "document"), embedder)
+    source = opensearch_source(indexed)
+    assert "vector" in source
+    assert "text_vector" in source
+    assert "audio_vector" not in source
+    assert "qwen_vector" not in source
+    assert "pdf_vector" not in source
 
 
 def test_index_records_expose_colbert_vectors_for_opensearch_lir() -> None:

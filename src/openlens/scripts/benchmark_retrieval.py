@@ -15,7 +15,7 @@ from rich.table import Table
 
 from openlens.config import get_settings
 from openlens.data import utc_now
-from openlens.indexer import check_status, make_client
+from openlens.indexer import VECTOR_SOURCE_FIELDS, check_status, make_client
 from openlens.retrieval import SearchMode, make_retriever
 from openlens.text import clean_text
 
@@ -130,7 +130,7 @@ def exact_cases(index_name: str, samples_per_modality: int) -> list[BenchmarkCas
             "size": samples_per_modality,
             "query": {"term": {"modality": modality}},
             "sort": [{"doc_id": "asc"}],
-            "_source": {"excludes": ["vector", "patch_vectors"]},
+            "_source": {"excludes": [*VECTOR_SOURCE_FIELDS, "patch_vectors", "colbert_vectors"]},
         }
         response = client.search(index=index_name, body=body)
         for idx, hit in enumerate(response.get("hits", {}).get("hits", []), start=1):

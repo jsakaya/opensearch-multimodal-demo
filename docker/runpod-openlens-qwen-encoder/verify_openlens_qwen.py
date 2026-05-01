@@ -14,14 +14,18 @@ REQUIRED_DISTS = (
     "pypdfium2",
     "torch",
     "accelerate",
+    "librosa",
+    "soundfile",
 )
 
 REQUIRED_MODULES = (
     "openlens.qwen_embedder",
     "openlens.colpali_embedder",
+    "openlens.audio_embedder",
     "qwen_vl_utils",
     "transformers.models.qwen3_vl",
     "transformers.models.colpali",
+    "transformers.models.clap",
     "pypdfium2",
 )
 

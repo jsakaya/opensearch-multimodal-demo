@@ -51,12 +51,18 @@ fi
 
 ENV_JSON=$(PUBKEY="$PUBKEY" python3 <<'PY'
 import json, os
-backend = os.environ.get("OPENLENS_EMBEDDING_BACKEND", "colpali")
-default_dim = "4096" if backend == "qwen" else "128"
+backend = os.environ.get("OPENLENS_EMBEDDING_BACKEND", "modality-router")
+if backend == "qwen":
+    default_dim = "4096"
+elif backend == "colpali":
+    default_dim = "128"
+else:
+    default_dim = "384"
 print(json.dumps({
     "PUBLIC_KEY": os.environ["PUBKEY"],
     "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
     "OPENLENS_EMBEDDING_BACKEND": backend,
+    "OPENLENS_USE_REAL_MODALITY_ENCODERS": os.environ.get("OPENLENS_USE_REAL_MODALITY_ENCODERS", "1"),
     "OPENLENS_QWEN_MODEL": "qwen8b",
     "OPENLENS_COLPALI_MODEL": os.environ.get("OPENLENS_COLPALI_MODEL", "colpali-v1.3"),
     "OPENLENS_VECTOR_DIM": os.environ.get("OPENLENS_VECTOR_DIM", default_dim),
