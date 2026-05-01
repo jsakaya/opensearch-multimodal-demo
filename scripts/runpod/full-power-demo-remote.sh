@@ -86,9 +86,8 @@ build_corpus() {
   if [[ "${OPENLENS_REBUILD_CORPUS:-0}" == "1" || ! -s "$OPENLENS_DOCS" ]]; then
     echo "building customer demo corpus..."
     openlens-build \
-      --customer-demo-space \
       --target-docs "${OPENLENS_TARGET_DOCS:-10000}" \
-      --query "${OPENLENS_SPACE_QUERY:-artemis moon mars earth exoplanet}" \
+      --query "${OPENLENS_SPACE_QUERY:-artemis moon mars earth exoplanet hubble webb mission control}" \
       --output "$OPENLENS_DOCS"
   fi
 }
@@ -118,7 +117,7 @@ openlens-benchmark \
   --output "$OPENLENS_DATA_DIR/retrieval-benchmark.json"
 
 echo
-echo "OpenLens full-power H100 demo is ready inside the pod."
+echo "OpenLens full-power GPU demo is ready inside the pod."
 echo "API: http://127.0.0.1:8787"
 echo "OpenSearch: $OPENSEARCH_URL"
 echo "Benchmark: $OPENLENS_DATA_DIR/retrieval-benchmark.md"

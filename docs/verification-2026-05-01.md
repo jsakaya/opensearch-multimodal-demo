@@ -1,96 +1,89 @@
-# Verification: 10k Multimodal OpenLens Run
+# Verification 2026-05-01
 
-Date: May 1, 2026
+Local OpenSearch 3.3.0 was rebuilt with the NASA customer-demo corpus.
 
-Environment:
-
-- OpenSearch 3.3.0 at `http://localhost:9200`
-- Index: `openlens_multimodal`
-- Vector dimension: `384`
-- Embedding backend: `feature-hash`
-- Qwen model setting: `qwen2b`
-
-Commands run:
+## Corpus Build
 
 ```bash
-uv run openlens-build --bulk-internet-archive --target-docs 10000 --ia-page-size 1000
-uv run openlens-index
-uv run openlens-smoke --query "public domain video spacewalk" --mode lir --top-k 5
-uv run openlens-smoke --query "archival audio speeches" --mode hybrid --top-k 5
+uv run openlens-build \
+  --target-docs 10000 \
+  --query "artemis moon mars earth exoplanet hubble webb mission control"
 ```
 
-Corpus build output:
+Output:
 
 ```text
-nasa: 500 SQL-style table records
-ia-texts: 2,375 records
-ia-images: 2,375 records
-ia-videos: 2,375 records
-ia-audio: 2,375 records
+nasa-images: 3,500 records
+nasa-videos: 1,800 records
+nasa-audio: 94 records
+ntrs: 2,400 records
+nasa-exoplanets: 1,800 records
+space demo shortfall: fetching 406 extra NASA images
+space demo shortfall: fetching 406 extra exoplanet rows
 Saved 10,000 records -> data/processed/open_corpus.jsonl
 ```
 
-Indexed output:
+## Distribution
+
+| Modality | Count |
+|---|---:|
+| image | 3,500 |
+| video | 1,800 |
+| audio | 94 |
+| pdf | 2,400 |
+| table | 2,206 |
+
+| Source | Count |
+|---|---:|
+| NASA Image and Video Library | 5,394 |
+| NASA STI Repository | 2,400 |
+| NASA Exoplanet Archive | 2,206 |
+
+Disallowed old-source metadata check: `0` records.
+
+## Index And Smoke
+
+```bash
+uv run openlens-index
+```
+
+Output:
 
 ```text
 Embedded 10,000 records -> data/processed/open_corpus_embedded.jsonl
 Indexed 10,000 documents into openlens_multimodal
 ```
 
-OpenSearch count:
+Smoke queries:
 
-```json
-{"count":10000,"_shards":{"total":1,"successful":1,"skipped":0,"failed":0}}
+```bash
+uv run openlens-smoke --query "Artemis moon landing mission video" --mode hybrid --top-k 5
+uv run openlens-smoke --query "mission control audio schedule inventory" --mode hybrid --top-k 5
 ```
 
-Corpus distribution:
+Observed top hits:
 
-| modality | count |
-|---|---:|
-| audio | 2,375 |
-| image | 2,375 |
-| pdf | 2,375 |
-| table | 500 |
-| video | 2,375 |
+| Query | Top Hit | Modality |
+|---|---|---|
+| Artemis moon landing mission video | NASA's Artemis I Moon Mission: Launch to Splashdown Highlights | video |
+| mission control audio schedule inventory | HWHAP Ep380 Mission Control: Schedule and Inventory | audio |
 
-Source distribution:
+## Benchmark
 
-| source | count |
-|---|---:|
-| Internet Archive | 9,500 |
-| NASA Exoplanet Archive | 500 |
-
-Patch-count distribution in `open_corpus_embedded.jsonl`:
-
-| patch_count | docs |
-|---:|---:|
-| 2 | 5,719 |
-| 3 | 3,342 |
-| 4 | 208 |
-| 5 | 53 |
-| 6 | 178 |
-| 10 | 500 |
-
-API verification:
-
-```json
-{
-  "opensearch": {
-    "available": true,
-    "detail": "OpenSearch 3.3.0 at http://localhost:9200",
-    "doc_count": 10000
-  },
-  "index": "openlens_multimodal",
-  "vector_dim": 384,
-  "embedding_backend": "feature-hash",
-  "qwen_model": "qwen2b"
-}
+```bash
+uv run openlens-benchmark \
+  --samples-per-modality 5 \
+  --repeats 3 \
+  --output docs/benchmarks/local-2026-05-01-nasa-feature-hash.json
 ```
 
-Browser verification:
+Summary:
 
-- Opened `http://localhost:8787`.
-- UI displayed `10000 docs on OpenSearch`.
-- Hybrid tab returned mixed PDF, image, video, and audio results.
-- LIR tab returned OpenSearch results and the detail pane showed patch metadata.
-- Screenshot captured locally at `output/playwright/openlens-10k-lir.png` (ignored by Git).
+| Slice | n | p50 ms | p95 ms | exact@k | modality@1 | modality@3 |
+|---|---:|---:|---:|---:|---:|---:|
+| all | 366 | 25.66 | 107.10 | 93.00% | 86.07% | 94.26% |
+| hybrid | 90 | 68.92 | 178.98 | 96.00% | 90.00% | 96.67% |
+| keyword | 90 | 8.31 | 25.52 | 92.00% | 90.00% | 96.67% |
+| lir | 90 | 42.41 | 107.09 | 92.00% | 83.33% | 93.33% |
+| vector | 90 | 5.21 | 9.43 | 92.00% | 80.00% | 90.00% |
+| sql | 6 | 9.26 | 15.87 | 0.00% | 100.00% | 100.00% |

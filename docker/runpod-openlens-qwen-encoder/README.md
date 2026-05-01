@@ -21,7 +21,7 @@ OPENLENS_QWEN_MAX_FRAMES=64 \
 openlens-index --skip-opensearch
 ```
 
-The H100 target is `Qwen/Qwen3-VL-Embedding-8B` at the full 4096-dimensional
+The H100/H200 target is `Qwen/Qwen3-VL-Embedding-8B` at the full 4096-dimensional
 embedding size. Run `openlens-qwen-benchmark --model qwen8b --dimension 4096
 --max-frames 64 --max-batch 64` in the pod to find the largest stable batch
 size for the exact GPU and media mix. A Qwen3.5-compatible path can be used the

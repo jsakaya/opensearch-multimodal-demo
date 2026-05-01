@@ -17,7 +17,7 @@ OpenSearch remains the base platform:
 4. **Retrieve in parallel** with BM25, vector k-NN, SQL, and LIR patch scoring.
 5. **Fuse candidates** with reciprocal rank fusion and preserve component scores
    so the UI can explain why a record surfaced.
-6. **Rerank on H100** with Qwen3-VL-Reranker-8B or another multimodal reranker
+6. **Rerank on H100/H200** with Qwen3-VL-Reranker-8B or another multimodal reranker
    over the top 50-200 OpenSearch candidates.
 7. **Synthesize only after retrieval** with an LLM that receives compact, cited
    evidence patches and returns an answer plus uncertainty and missing-evidence
@@ -29,7 +29,7 @@ The production-quality path should be:
 query
   -> query rewrite / modality intent
   -> OpenSearch BM25 + kNN + SQL + LIR candidate retrieval
-  -> Qwen multimodal reranker on H100
+  -> Qwen multimodal reranker on H100/H200
   -> evidence clustering
   -> grounded LLM synthesis with citations
   -> UI evidence board
@@ -77,7 +77,7 @@ UI should always keep the raw OpenSearch evidence visible.
 ## Demo Claims To Make
 
 - OpenSearch is the operational retrieval substrate.
-- Qwen on H100 gives full multimodal embedding and reranking quality.
+- Qwen on H100/H200 gives full multimodal embedding and reranking quality.
 - LIR gives patch-level evidence instead of opaque document-level hits.
 - SQL/table retrieval lives in the same search experience.
 - Audio retrieval is handled responsibly through transcript/caption evidence and

@@ -2,9 +2,8 @@
 
 OpenLens is a local-first OpenSearch demo for searching open multimodal records:
 
-- Wikimedia Commons image files and machine-readable license metadata.
-- arXiv paper/PDF records, with optional first-page PDF text extraction.
-- Internet Archive text/PDF-like records, images, videos, audio records, and thumbnails.
+- NASA Image and Video Library images, videos, audio clips, and thumbnails.
+- NASA STI Repository / NTRS technical PDF records and public document metadata.
 - NASA Exoplanet Archive TAP rows treated as SQL-style table documents.
 
 The demo indexes every item into one OpenSearch schema with BM25 fields, facets, a pooled HNSW `knn_vector`, and per-document patch vectors for late-interaction reranking. Retrieval runs as keyword, vector, RRF hybrid, or LIR patch rerank search. The code is designed so a tiny local corpus and a million-document corpus use the same ingestion/index contract.
@@ -24,9 +23,8 @@ The default embedder is deterministic and local so the 10k demo can run anywhere
 
 ## Data Sources
 
-- Wikimedia Commons metadata is read through the MediaWiki Action API `imageinfo` module with `iiprop=extmetadata`.
-- arXiv metadata is read from the public Atom API; each record carries the abstract page and PDF URL.
-- Internet Archive records are read through `advancedsearch.php` and use archive item thumbnails.
+- NASA Image and Video Library metadata is read through `https://images-api.nasa.gov/search`.
+- NASA STI Repository / NTRS records are read through `https://ntrs.nasa.gov/api/citations/search`.
 - NASA Exoplanet Archive rows are read through the TAP SQL endpoint in CSV format.
 
 All generated data under `data/processed/` is ignored by Git.
@@ -44,23 +42,16 @@ Build a small open corpus:
 uv run openlens-build --limit-per-source 8
 ```
 
-Build the 10,000-record multimodal corpus:
-
-```bash
-uv run openlens-build --bulk-internet-archive --target-docs 10000 --ia-page-size 1000
-```
-
-Build a more customer-friendly NASA/space corpus with images, videos, audio,
-PDF-like papers, and SQL-style exoplanet rows:
+Build the 10,000-record NASA/space corpus with images, videos, audio, technical
+PDF records, and SQL-style exoplanet rows:
 
 ```bash
 uv run openlens-build \
-  --customer-demo-space \
   --target-docs 10000 \
-  --query "artemis moon mars earth exoplanet"
+  --query "artemis moon mars earth exoplanet hubble webb mission control"
 ```
 
-Optionally extract first pages from arXiv PDFs:
+Optionally fetch available NASA STI full-text snippets:
 
 ```bash
 uv run openlens-build --limit-per-source 4 --fetch-pdf-text
@@ -88,7 +79,7 @@ Run a smoke query:
 
 ```bash
 uv run openlens-smoke --query "satellite imagery climate change"
-uv run openlens-smoke --query "archival audio speeches" --mode lir
+uv run openlens-smoke --query "mission control audio schedule inventory" --mode lir
 ```
 
 Run a repeatable OpenSearch benchmark:
@@ -97,9 +88,9 @@ Run a repeatable OpenSearch benchmark:
 uv run openlens-benchmark --output docs/benchmarks/local-openlens.json
 ```
 
-See `docs/retrieval-quality-and-display.md` for the H100 reranking, audio
+See `docs/retrieval-quality-and-display.md` for the H100/H200 reranking, audio
 enrichment, and LLM evidence-display plan. The latest committed local hard-number
-run is in `docs/benchmarks/local-2026-05-01-feature-hash.md`.
+run is in `docs/benchmarks/local-2026-05-01-nasa-feature-hash.md`.
 
 Serve the app:
 
@@ -115,7 +106,7 @@ Open http://localhost:8787.
 curl http://localhost:8787/api/status
 curl -X POST http://localhost:8787/api/prewarm
 curl 'http://localhost:8787/api/search?q=satellite%20imagery%20climate%20change&mode=hybrid&top_k=5'
-curl 'http://localhost:8787/api/search?q=public%20domain%20video%20spacewalk&mode=lir&top_k=5'
+curl 'http://localhost:8787/api/search?q=Artemis%20moon%20landing%20mission%20video&mode=lir&top_k=5'
 ```
 
 Near real-time ingest:
@@ -145,7 +136,7 @@ With OpenSearch available, the API writes the record to JSONL for replay, indexe
 
 ## Qwen / RunPod Encoder
 
-For the best GPU-native multimodal encoding on H100:
+For the best GPU-native multimodal encoding on H100/H200:
 
 ```bash
 uv sync --extra qwen
@@ -165,16 +156,18 @@ The optional RunPod image lives in `docker/runpod-openlens-qwen-encoder/` and mi
 - Build-time `verify_openlens_qwen.py`.
 - GHCR workflow: `.github/workflows/build-runpod-openlens-qwen-encoder.yml`.
 
-Full-power H100 demo path:
+See `docs/runpod-gpu-plan.md` for the current `runpodctl` GPU/volume choice.
+
+Full-power RunPod demo path:
 
 ```bash
-export RUNPOD_API_KEY=...
-export RUNPOD_VOLUME_ID=...
+# RUNPOD_API_KEY is read from env or macOS Keychain item runpod-api-key.
+# Defaults: H200 SXM in US-CA-2 with the josephsakaya-unsloth-h100 volume.
 scripts/runpod/up.sh
 scripts/runpod/full-power-demo.sh
 ```
 
-`full-power-demo.sh` SSHes into the H100 pod, starts a single-node OpenSearch
+`full-power-demo.sh` SSHes into the GPU pod, starts a single-node OpenSearch
 3.3 service if `OPENSEARCH_URL` is not already reachable, autotunes the Qwen
 batch size up to `OPENLENS_QWEN_MAX_BATCH=64`, builds the 10k NASA/space corpus,
 indexes full 4096-dimensional Qwen vectors and patch vectors into OpenSearch,
@@ -205,13 +198,11 @@ uv run ruff check .
 
 Verified locally on May 1, 2026 with OpenSearch 3.3.0:
 
-- `uv run openlens-build --limit-per-source 5` fetched 19 public records.
-- `uv run openlens-index` indexed 19 documents into `openlens_multimodal`.
-- `uv run openlens-smoke --query "satellite imagery climate change" --top-k 5` used the OpenSearch hybrid path.
-- `POST /api/ingest` inserted a live document and a follow-up search returned it as the top hit.
-- `uv run openlens-build --bulk-internet-archive --target-docs 10000 --ia-page-size 1000` fetched exactly 10,000 public records: 2,375 each for IA text/PDF-like records, images, videos, audio records, plus 500 NASA table rows.
-- `uv run openlens-index` embedded and indexed those 10,000 records into `openlens_multimodal`.
-- `uv run openlens-smoke --query "public domain video spacewalk" --mode lir --top-k 5` used the OpenSearch LIR path.
-- Browser verification showed the LIR tab, patch trail, and `10000 docs on OpenSearch`.
+- `uv run openlens-build --limit-per-source 3 --output /tmp/openlens-nasa-small.jsonl` fetched 15 NASA records.
+- `uv run openlens-build --target-docs 10000 --query "artemis moon mars earth exoplanet hubble webb mission control"` builds the customer-facing NASA corpus.
+- `uv run openlens-index` embeds and indexes the records into `openlens_multimodal`.
+- `uv run openlens-smoke --query "Artemis moon landing mission video" --mode hybrid --top-k 5` uses the OpenSearch hybrid path.
+- `uv run openlens-smoke --query "mission control audio schedule inventory" --mode lir --top-k 5` uses the OpenSearch LIR path.
+- Browser verification should show the LIR tab, patch trail, and the current OpenSearch document count.
 
-See `docs/verification-2026-05-01.md` for the exact 10k run log and distribution.
+See `docs/verification-2026-05-01.md` for the exact NASA run log and distribution.

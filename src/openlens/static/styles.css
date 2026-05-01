@@ -1,5 +1,5 @@
 :root {
-  --archive-paper: #f7f4ec;
+  --page-paper: #f7f4ec;
   --catalog-sheet: #fffdf8;
   --microfiche: #e7eee7;
   --ink: #171a18;
@@ -11,7 +11,7 @@
   --plate-red: #a94336;
   --catalog-amber: #bd842d;
   --blueprint: #3e6476;
-  --violet-archive: #665377;
+  --mission-violet: #665377;
   --shadow: 0 14px 40px rgba(29, 33, 29, 0.08);
   color-scheme: light;
   font-family:
@@ -29,7 +29,7 @@ body {
 
 body {
   margin: 0;
-  background: var(--archive-paper);
+  background: var(--page-paper);
   color: var(--ink);
 }
 
@@ -335,7 +335,7 @@ textarea:focus {
 }
 
 .result-card[data-modality="video"] .modality-rail {
-  background: var(--violet-archive);
+  background: var(--mission-violet);
 }
 
 .result-card[data-modality="audio"] .modality-rail {

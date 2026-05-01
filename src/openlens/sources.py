@@ -14,20 +14,8 @@ from .text import clean_text, table_text
 
 
 ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
-DEFAULT_QUERY = "earth observation climate machine learning"
-IA_DATE_SHARDS = [
-    "[0001-01-01 TO 1899-12-31]",
-    "[1900-01-01 TO 1949-12-31]",
-    "[1950-01-01 TO 1979-12-31]",
-    "[1980-01-01 TO 1989-12-31]",
-    "[1990-01-01 TO 1999-12-31]",
-    "[2000-01-01 TO 2004-12-31]",
-    "[2005-01-01 TO 2009-12-31]",
-    "[2010-01-01 TO 2014-12-31]",
-    "[2015-01-01 TO 2019-12-31]",
-    "[2020-01-01 TO 2022-12-31]",
-    "[2023-01-01 TO 2026-12-31]",
-]
+DEFAULT_QUERY = "artemis mars earth moon hubble webb exoplanet"
+NTRS_BASE_URL = "https://ntrs.nasa.gov"
 
 
 class OpenSourceClient:
@@ -181,6 +169,9 @@ class OpenSourceClient:
             if not items:
                 break
             for item in items:
+                raw_item_text = str(item).lower()
+                if "archive.org" in raw_item_text or "internet archive" in raw_item_text:
+                    continue
                 row = (item.get("data") or [{}])[0]
                 nasa_id = clean_text(row.get("nasa_id"))
                 title = clean_text(row.get("title") or nasa_id)
@@ -227,196 +218,61 @@ class OpenSourceClient:
             page += 1
         return records
 
-    def internet_archive_videos(self, query: str = DEFAULT_QUERY, limit: int = 8) -> list[OpenRecord]:
-        return self.internet_archive_media("movies", "video", query=query, limit=limit)
-
-    def internet_archive_media(
+    def ntrs_pdfs(
         self,
-        mediatype: str,
-        modality: str,
-        query: str = "",
+        query: str = DEFAULT_QUERY,
         limit: int = 8,
-        page_size: int = 1000,
-        sort: str = "downloads desc",
+        fetch_pdf_text: bool = False,
     ) -> list[OpenRecord]:
-        fields = [
-            "identifier",
-            "title",
-            "description",
-            "creator",
-            "licenseurl",
-            "date",
-            "collection",
-            "subject",
-            "downloads",
-            "mediatype",
-            "language",
-        ]
-        page = 1
+        params = {
+            "q": query,
+            "page.size": str(min(100, max(1, limit))),
+            "distribution": "PUBLIC",
+            "disseminated": "DOCUMENT_AND_METADATA",
+        }
+        payload = self.client.get(f"{NTRS_BASE_URL}/api/citations/search", params=params).json()
         records: list[OpenRecord] = []
-        query = clean_text(query)
-        q = f"mediatype:{mediatype}"
-        if query and query != "*":
-            q = f"{q} AND ({query})"
-        while len(records) < limit:
-            params = {
-                "q": q,
-                "fl[]": fields,
-                "rows": str(min(page_size, limit - len(records))),
-                "page": str(page),
-                "output": "json",
-                "sort[]": sort,
-            }
-            payload = self.client.get("https://archive.org/advancedsearch.php", params=params).json()
-            docs = payload.get("response", {}).get("docs", [])
-            if not docs:
-                break
-            for row in docs:
-                identifier = clean_text(row.get("identifier"))
-                if not identifier:
-                    continue
-                records.append(self._internet_archive_record(row, identifier, modality))
-                if len(records) >= limit:
-                    break
-            page += 1
-        return records
-
-    def internet_archive_media_scrape(
-        self,
-        mediatype: str,
-        modality: str,
-        query: str = "",
-        limit: int = 8,
-        page_size: int = 1000,
-        sort: str = "",
-    ) -> list[OpenRecord]:
-        fields = [
-            "identifier",
-            "title",
-            "description",
-            "creator",
-            "licenseurl",
-            "date",
-            "collection",
-            "subject",
-            "downloads",
-            "mediatype",
-            "language",
-        ]
-        query = clean_text(query)
-        q = f"mediatype:{mediatype}"
-        if query and query != "*":
-            q = f"{q} AND ({query})"
-        cursor = ""
-        records: list[OpenRecord] = []
-        while len(records) < limit:
-            params = {
-                "q": q,
-                "fields": ",".join(fields),
-                "count": str(max(100, min(page_size, limit - len(records)))),
-            }
-            if sort:
-                params["sorts"] = sort
-            if cursor:
-                params["cursor"] = cursor
-            payload = self.client.get("https://archive.org/services/search/v1/scrape", params=params).json()
-            items = payload.get("items") or []
-            if not items:
-                break
-            for row in items[: max(0, limit - len(records))]:
-                identifier = clean_text(row.get("identifier"))
-                if identifier:
-                    records.append(self._internet_archive_record(row, identifier, modality))
-            next_cursor = clean_text(payload.get("cursor"))
-            if not next_cursor or next_cursor == cursor:
-                break
-            cursor = next_cursor
-        return records
-
-    def internet_archive_media_sharded(
-        self,
-        mediatype: str,
-        modality: str,
-        query: str = "",
-        limit: int = 8,
-        page_size: int = 1000,
-    ) -> list[OpenRecord]:
-        records: list[OpenRecord] = []
-        seen: set[str] = set()
-        query = clean_text(query)
-        for date_range in IA_DATE_SHARDS:
-            if len(records) >= limit:
-                break
-            shard_query = f"date:{date_range}"
-            if query and query != "*":
-                shard_query = f"({query}) AND {shard_query}"
-            remaining = limit - len(records)
-            batch = self.internet_archive_media(
-                mediatype,
-                modality,
-                query=shard_query,
-                limit=remaining,
-                page_size=page_size,
-                sort="date desc",
-            )
-            for record in batch:
-                if record.doc_id not in seen:
-                    records.append(record)
-                    seen.add(record.doc_id)
-                if len(records) >= limit:
-                    break
-        return records
-
-    def _internet_archive_record(self, row: dict[str, Any], identifier: str, modality: str) -> OpenRecord:
-        title = clean_text(_join_values(row.get("title")) or identifier)
-        description = clean_text(_join_values(row.get("description")), max_chars=2400)
-        creator = _join_values(row.get("creator"))
-        collections = _as_list(row.get("collection"))
-        subjects = _as_list(row.get("subject"))
-        license_url = clean_text(_join_values(row.get("licenseurl")))
-        mediatype = clean_text(row.get("mediatype"))
-        thumbnail_url = f"https://archive.org/services/img/{identifier}"
-        asset_kind = "thumbnail"
-        mime_type = "image/jpeg"
-        if modality == "audio":
-            asset_kind = "audio-item"
-            mime_type = "audio/*"
-        elif modality == "video":
-            asset_kind = "video-item"
-            mime_type = "video/*"
-        elif modality == "pdf":
-            asset_kind = "text-item"
-            mime_type = "application/pdf"
-        return OpenRecord(
-            doc_id="archive-" + stable_id(identifier),
-            source="Internet Archive",
-            source_id=identifier,
-            source_url=f"https://archive.org/details/{identifier}",
-            modality=modality,  # type: ignore[arg-type]
-            title=title,
-            summary=description,
-            body=description,
-            license=license_url or "Internet Archive metadata",
-            license_url=license_url,
-            attribution=creator,
-            language=_join_values(row.get("language")) or "unknown",
-            published_at=clean_text(row.get("date")) or None,
-            tags=[modality, "internet archive", mediatype, *collections[:8], *subjects[:8]],
-            facets={
-                "collection": collections,
-                "subjects": subjects[:16],
-                "downloads": row.get("downloads"),
-                "mediatype": mediatype,
-            },
-            assets=[
-                Asset(
-                    kind=asset_kind,
-                    url=f"https://archive.org/details/{identifier}",
-                    thumbnail_url=thumbnail_url,
-                    mime_type=mime_type,
+        for row in payload.get("results", [])[:limit]:
+            source_id = clean_text(row.get("id"))
+            title = clean_text(row.get("title") or source_id)
+            if not source_id or not title:
+                continue
+            abstract = clean_text(row.get("abstract"), max_chars=2400)
+            subjects = _as_list(row.get("subjectCategories"))
+            center = row.get("center") or {}
+            authors = _ntrs_authors(row.get("authorAffiliations") or [])
+            downloads = row.get("downloads") or []
+            pdf_path = _ntrs_download_path(downloads, "pdf") or _ntrs_download_path(downloads, "original")
+            fulltext_path = _ntrs_download_path(downloads, "fulltext")
+            pdf_url = _ntrs_url(pdf_path)
+            fulltext = self._read_text(_ntrs_url(fulltext_path), max_chars=5600) if fetch_pdf_text and fulltext_path else ""
+            records.append(
+                OpenRecord(
+                    doc_id="ntrs-" + stable_id(source_id),
+                    source="NASA STI Repository",
+                    source_id=source_id,
+                    source_url=f"{NTRS_BASE_URL}/citations/{source_id}",
+                    modality="pdf",
+                    title=title,
+                    summary=abstract,
+                    body=clean_text(" ".join([abstract, fulltext]), max_chars=8000),
+                    license="NASA STI public record",
+                    license_url="https://ntrs.nasa.gov/api/openapi/",
+                    attribution=", ".join(authors) or clean_text(center.get("name")) or "NASA",
+                    published_at=clean_text(row.get("distributionDate") or row.get("created")) or None,
+                    tags=["pdf", "nasa", "ntrs", clean_text(row.get("stiType")), *subjects[:10]],
+                    facets={
+                        "center": clean_text(center.get("name")),
+                        "stiType": clean_text(row.get("stiType")),
+                        "stiTypeDetails": clean_text(row.get("stiTypeDetails")),
+                        "subjectCategories": subjects[:12],
+                        "authors": authors[:8],
+                        "downloadsAvailable": row.get("downloadsAvailable"),
+                    },
+                    assets=[Asset(kind="pdf", url=pdf_url or f"{NTRS_BASE_URL}/citations/{source_id}", mime_type="application/pdf")],
                 )
-            ],
-        )
+            )
+        return records
 
     def nasa_exoplanet_rows(self, limit: int = 12) -> list[OpenRecord]:
         query = (
@@ -469,6 +325,11 @@ class OpenSourceClient:
             pages.append(page.extract_text() or "")
         return clean_text(" ".join(pages), max_chars=8000)
 
+    def _read_text(self, url: str, max_chars: int = 8000) -> str:
+        response = self.client.get(url)
+        response.raise_for_status()
+        return clean_text(response.text, max_chars=max_chars)
+
 
 def _as_list(value: Any) -> list[str]:
     if value is None:
@@ -480,6 +341,35 @@ def _as_list(value: Any) -> list[str]:
 
 def _join_values(value: Any) -> str:
     return ", ".join(_as_list(value))
+
+
+def _ntrs_authors(values: list[dict[str, Any]]) -> list[str]:
+    authors: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        author = ((value.get("meta") or {}).get("author") or {}).get("name")
+        name = clean_text(author)
+        if name and name.lower() not in seen:
+            authors.append(name)
+            seen.add(name.lower())
+    return authors
+
+
+def _ntrs_download_path(downloads: list[dict[str, Any]], key: str) -> str:
+    for download in downloads:
+        links = download.get("links") or {}
+        path = clean_text(links.get(key))
+        if path:
+            return path
+    return ""
+
+
+def _ntrs_url(path: str) -> str:
+    if not path:
+        return ""
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    return f"{NTRS_BASE_URL}{path if path.startswith('/') else '/' + path}"
 
 
 def dedupe_records(records: Iterable[OpenRecord]) -> list[OpenRecord]:

@@ -153,13 +153,13 @@ def prewarm() -> dict[str, Any]:
 def examples() -> dict[str, Any]:
     return {
         "queries": [
-            "satellite imagery climate change",
-            "PDF pages with charts about machine learning for earth observation",
-            "public domain videos of scientific archives",
-            "archival audio recordings about civil rights speeches",
+            "Artemis moon landing mission video",
+            "Mars rover helicopter image",
+            "NASA technical reports about exoplanet occurrence rates",
+            "mission control audio schedule inventory",
             "transit method exoplanet rows",
             "SELECT title, body FROM openlens WHERE modality = 'table' LIMIT 5",
-            "glacier retreat images",
+            "Hubble Webb dark matter galaxy images",
         ],
         "modes": ["hybrid", "keyword", "vector", "lir", "sql"],
         "modalities": ["image", "pdf", "document", "video", "audio", "table"],

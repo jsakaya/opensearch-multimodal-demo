@@ -14,6 +14,22 @@ require_env() {
   fi
 }
 
+load_runpod_key() {
+  if [[ -n "${RUNPOD_API_KEY:-}" ]]; then
+    export RUNPOD_API_KEY
+    return 0
+  fi
+  if command -v security >/dev/null 2>&1; then
+    RUNPOD_API_KEY="$(security find-generic-password -s runpod-api-key -w 2>/dev/null || true)"
+    if [[ -n "$RUNPOD_API_KEY" ]]; then
+      export RUNPOD_API_KEY
+      return 0
+    fi
+  fi
+  echo "missing RUNPOD_API_KEY; export it or store it in Keychain as runpod-api-key" >&2
+  return 1
+}
+
 api() {
   local method="$1"; shift
   local path="$1"; shift

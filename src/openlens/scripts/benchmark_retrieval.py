@@ -163,10 +163,10 @@ def query_from_doc(doc: dict[str, Any]) -> str:
 
 def scenario_cases() -> list[BenchmarkCase]:
     scenarios = [
-        ("scenario-audio", "archival audio recording speech music mission control", "audio"),
-        ("scenario-video", "public domain video spacewalk rocket launch spacecraft", "video"),
-        ("scenario-image", "image of mars rover moon earth satellite", "image"),
-        ("scenario-pdf", "PDF paper about earth observation exoplanet climate", "pdf"),
+        ("scenario-audio", "NASA mission control audio schedule inventory", "audio"),
+        ("scenario-video", "Artemis moon landing rocket launch spacecraft video", "video"),
+        ("scenario-image", "Mars rover moon earth satellite NASA image", "image"),
+        ("scenario-pdf", "NASA technical report about earth observation exoplanet climate", "pdf"),
         ("scenario-table", "transit method exoplanet orbital period table row", "table"),
     ]
     cases: list[BenchmarkCase] = []

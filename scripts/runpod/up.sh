@@ -1,76 +1,84 @@
 #!/usr/bin/env bash
-# Create an H100 RunPod pod for OpenLens Qwen3-VL-Embedding encoding.
+# Create a RunPod pod for OpenLens Qwen3-VL-Embedding encoding.
 #
 # Required:
-#   RUNPOD_API_KEY
-#   RUNPOD_VOLUME_ID
+#   RUNPOD_API_KEY, or a macOS Keychain item named runpod-api-key
 #
 # Optional:
-#   RUNPOD_POD_NAME=openlens-qwen-h100
-#   RUNPOD_GPU="NVIDIA H100 80GB HBM3"
+#   RUNPOD_VOLUME_ID=t0ys2ffnll
+#   RUNPOD_VOLUME_NAME=josephsakaya-unsloth-h100
+#   RUNPOD_POD_NAME=openlens-qwen-h200
+#   RUNPOD_GPU_ID="NVIDIA H200"
+#   RUNPOD_DATA_CENTER_IDS=US-CA-2
 #   RUNPOD_IMAGE=ghcr.io/jsakaya/openlens-qwen-encoder:latest
 #   RUNPOD_PUBKEY=~/.ssh/id_ed25519.pub
 
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
-require_env RUNPOD_API_KEY
-require_env RUNPOD_VOLUME_ID
+load_runpod_key
 
-NAME="${RUNPOD_POD_NAME:-openlens-qwen-h100}"
-GPU="${RUNPOD_GPU:-NVIDIA H100 80GB HBM3}"
+NAME="${RUNPOD_POD_NAME:-openlens-qwen-h200}"
+GPU="${RUNPOD_GPU_ID:-${RUNPOD_GPU:-NVIDIA H200}}"
+DATA_CENTER_IDS="${RUNPOD_DATA_CENTER_IDS:-US-CA-2}"
 IMAGE="${RUNPOD_IMAGE:-ghcr.io/jsakaya/openlens-qwen-encoder:latest}"
 PUBKEY_FILE="${RUNPOD_PUBKEY:-$HOME/.ssh/id_ed25519.pub}"
 [[ -f "$PUBKEY_FILE" ]] || { echo "no SSH public key at $PUBKEY_FILE" >&2; exit 1; }
 PUBKEY="$(cat "$PUBKEY_FILE")"
+VOLUME_ID="${RUNPOD_VOLUME_ID:-}"
+if [[ -z "$VOLUME_ID" ]]; then
+  VOLUME_NAME="${RUNPOD_VOLUME_NAME:-josephsakaya-unsloth-h100}"
+  VOLUME_ID="$(runpodctl network-volume list -o json | jq -r --arg name "$VOLUME_NAME" '.[] | select(.name == $name) | .id' | head -1)"
+fi
+[[ -n "$VOLUME_ID" ]] || { echo "missing RUNPOD_VOLUME_ID and could not resolve RUNPOD_VOLUME_NAME" >&2; exit 1; }
 
 if [[ -f "$STATE_DIR/pod-id" ]]; then
   echo "pod already registered: $(cat "$STATE_DIR/pod-id")" >&2
   exit 1
 fi
 
-REQUEST=$(NAME="$NAME" GPU="$GPU" IMAGE="$IMAGE" VOL="$RUNPOD_VOLUME_ID" PUBKEY="$PUBKEY" python3 <<'PY'
+ENV_JSON=$(PUBKEY="$PUBKEY" python3 <<'PY'
 import json, os
 print(json.dumps({
-    "name": os.environ["NAME"],
-    "imageName": os.environ["IMAGE"],
-    "cloudType": "SECURE",
-    "computeType": "GPU",
-    "gpuTypeIds": [os.environ["GPU"]],
-    "gpuCount": 1,
-    "gpuTypePriority": "availability",
-    "dataCenterPriority": "availability",
-    "allowedCudaVersions": ["13.0", "12.9", "12.8"],
-    "containerDiskInGb": 80,
-    "networkVolumeId": os.environ["VOL"],
-    "volumeMountPath": "/workspace",
-    "ports": ["22/tcp"],
-    "supportPublicIp": True,
-    "env": {
-        "PUBLIC_KEY": os.environ["PUBKEY"],
-        "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
-        "OPENLENS_EMBEDDING_BACKEND": "qwen",
-        "OPENLENS_QWEN_MODEL": "qwen8b",
-        "OPENLENS_VECTOR_DIM": "4096",
-        "OPENLENS_QWEN_BATCH_SIZE": os.environ.get("OPENLENS_QWEN_BATCH_SIZE", "16"),
-        "OPENLENS_QWEN_MAX_FRAMES": os.environ.get("OPENLENS_QWEN_MAX_FRAMES", "64"),
-        "OPENLENS_QWEN_FPS": os.environ.get("OPENLENS_QWEN_FPS", "1.0"),
-        "OPENLENS_REQUIRE_OPENSEARCH": "1",
-    },
+    "PUBLIC_KEY": os.environ["PUBKEY"],
+    "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
+    "OPENLENS_EMBEDDING_BACKEND": "qwen",
+    "OPENLENS_QWEN_MODEL": "qwen8b",
+    "OPENLENS_VECTOR_DIM": "4096",
+    "OPENLENS_QWEN_BATCH_SIZE": os.environ.get("OPENLENS_QWEN_BATCH_SIZE", "16"),
+    "OPENLENS_QWEN_MAX_FRAMES": os.environ.get("OPENLENS_QWEN_MAX_FRAMES", "64"),
+    "OPENLENS_QWEN_FPS": os.environ.get("OPENLENS_QWEN_FPS", "1.0"),
+    "OPENLENS_REQUIRE_OPENSEARCH": "1",
 }))
 PY
 )
 
-echo "creating $NAME ($GPU, image=$IMAGE, volume=$RUNPOD_VOLUME_ID)..." >&2
-RESPONSE="$(api POST /pods "$REQUEST")"
-POD_ID="$(printf '%s' "$RESPONSE" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
+echo "creating $NAME ($GPU, data centers=$DATA_CENTER_IDS, image=$IMAGE, volume=$VOLUME_ID)..." >&2
+RESPONSE="$(runpodctl pod create \
+  --name "$NAME" \
+  --image "$IMAGE" \
+  --cloud-type SECURE \
+  --gpu-id "$GPU" \
+  --gpu-count 1 \
+  --data-center-ids "$DATA_CENTER_IDS" \
+  --container-disk-in-gb "${RUNPOD_CONTAINER_DISK_GB:-100}" \
+  --network-volume-id "$VOLUME_ID" \
+  --volume-mount-path /workspace \
+  --ports "22/tcp,8787/http,9200/http" \
+  --env "$ENV_JSON" \
+  -o json)"
+POD_ID="$(printf '%s' "$RESPONSE" | jq -r '.id')"
 echo "$POD_ID" > "$STATE_DIR/pod-id"
 
 echo "waiting for public SSH..." >&2
 for _ in $(seq 1 96); do
-  STATUS="$(api GET "/pods/$POD_ID")"
+  STATUS="$(runpodctl pod get "$POD_ID" -o json 2>/dev/null || true)"
   PARSED="$(printf '%s' "$STATUS" | python3 -c '
 import json, sys
-d=json.load(sys.stdin)
+raw=sys.stdin.read().strip()
+if not raw:
+    print("WAIT")
+    raise SystemExit
+d=json.loads(raw)
 runtime=d.get("runtime") or {}
 ports=runtime.get("ports") or []
 ssh=next((p for p in ports if int(p.get("privatePort",0)) == 22 and p.get("isIpPublic")), None)
