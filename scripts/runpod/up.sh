@@ -7,9 +7,9 @@
 # Optional:
 #   RUNPOD_VOLUME_ID=t0ys2ffnll
 #   RUNPOD_VOLUME_NAME=josephsakaya-unsloth-h100
-#   RUNPOD_POD_NAME=openlens-colpali-h200
-#   RUNPOD_GPU_ID="NVIDIA H200"
-#   RUNPOD_DATA_CENTER_IDS=US-CA-2
+#   RUNPOD_POD_NAME=openlens-colpali-a40
+#   RUNPOD_GPU_ID="NVIDIA A40"
+#   RUNPOD_DATA_CENTER_IDS=CA-MTL-1
 #   RUNPOD_TEMPLATE_ID=r97liuwvkd
 #   RUNPOD_IMAGE=ghcr.io/jsakaya/openlens-qwen-encoder:latest
 #   RUNPOD_PUBKEY=~/.ssh/id_ed25519.pub
@@ -20,9 +20,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 load_runpod_key
 
-NAME="${RUNPOD_POD_NAME:-openlens-colpali-h200}"
-GPU="${RUNPOD_GPU_ID:-${RUNPOD_GPU:-NVIDIA H200}}"
-DATA_CENTER_IDS="${RUNPOD_DATA_CENTER_IDS:-US-CA-2}"
+NAME="${RUNPOD_POD_NAME:-openlens-colpali-a40}"
+GPU="${RUNPOD_GPU_ID:-${RUNPOD_GPU:-NVIDIA A40}}"
+DATA_CENTER_IDS="${RUNPOD_DATA_CENTER_IDS:-CA-MTL-1}"
 TEMPLATE_ID="${RUNPOD_TEMPLATE_ID:-r97liuwvkd}"
 IMAGE="${RUNPOD_IMAGE:-ghcr.io/jsakaya/openlens-qwen-encoder:latest}"
 PUBKEY_FILE="${RUNPOD_PUBKEY:-$HOME/.ssh/id_ed25519.pub}"

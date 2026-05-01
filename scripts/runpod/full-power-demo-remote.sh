@@ -24,6 +24,7 @@ export OPENLENS_COLPALI_MAX_PATCH_VECTORS="${OPENLENS_COLPALI_MAX_PATCH_VECTORS:
 export OPENLENS_QWEN_MAX_FRAMES="${OPENLENS_QWEN_MAX_FRAMES:-64}"
 export OPENLENS_QWEN_FPS="${OPENLENS_QWEN_FPS:-1.0}"
 export OPENLENS_REQUIRE_OPENSEARCH=1
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 
 mkdir -p "$OPENLENS_DATA_DIR"
 
@@ -33,18 +34,21 @@ ensure_opensearch() {
   fi
 
   local version="${OPENLENS_OPENSEARCH_VERSION:-3.6.0}"
-  local os_home="${OPENLENS_OPENSEARCH_HOME:-/workspace/opensearch-$version}"
+  local os_home="${OPENLENS_OPENSEARCH_HOME:-/tmp/opensearch-$version}"
+  local os_data="${OPENLENS_OPENSEARCH_DATA_DIR:-/tmp/openlens-os-data}"
+  local os_logs="${OPENLENS_OPENSEARCH_LOG_DIR:-/tmp/openlens-os-logs}"
+  local os_user_home="${OPENLENS_OPENSEARCH_USER_HOME:-/tmp/openlens-os-home}"
   local tarball="${OPENLENS_OPENSEARCH_TARBALL:-https://artifacts.opensearch.org/releases/bundle/opensearch/$version/opensearch-$version-linux-x64.tar.gz}"
 
   if [[ ! -x "$os_home/bin/opensearch" ]]; then
     echo "downloading OpenSearch $version..."
     curl -fL "$tarball" -o /tmp/opensearch.tgz
-    tar -xzf /tmp/opensearch.tgz -C /workspace
+    tar --no-same-owner -xzf /tmp/opensearch.tgz -C /tmp
   fi
 
-  mkdir -p "$OPENLENS_DATA_DIR/os-data" "$OPENLENS_DATA_DIR/os-logs" /workspace/openlens-os-home
+  mkdir -p "$os_data" "$os_logs" "$os_user_home"
   if ! id openlens-os >/dev/null 2>&1; then
-    useradd -m -d /workspace/openlens-os-home -s /bin/bash openlens-os
+    useradd -m -d "$os_user_home" -s /bin/bash openlens-os
   fi
   cat >"$os_home/config/opensearch.yml" <<EOF
 cluster.name: openlens-gpu
@@ -53,11 +57,11 @@ discovery.type: single-node
 network.host: 127.0.0.1
 http.port: 9200
 plugins.security.disabled: true
-path.data: $OPENLENS_DATA_DIR/os-data
-path.logs: $OPENLENS_DATA_DIR/os-logs
+path.data: $os_data
+path.logs: $os_logs
 node.store.allow_mmap: false
 EOF
-  chown -R openlens-os:openlens-os "$os_home" "$OPENLENS_DATA_DIR/os-data" "$OPENLENS_DATA_DIR/os-logs" /workspace/openlens-os-home
+  chown -R openlens-os:openlens-os "$os_home" "$os_data" "$os_logs" "$os_user_home"
 
   echo "starting OpenSearch on $OPENSEARCH_URL..."
   su -s /bin/bash openlens-os -c "OPENSEARCH_JAVA_OPTS='-Xms4g -Xmx4g' $os_home/bin/opensearch" \

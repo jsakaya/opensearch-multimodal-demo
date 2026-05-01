@@ -10,6 +10,7 @@ from openlens.indexer import prepare_record
 from openlens.models import Asset, OpenRecord
 from openlens.qwen_embedder import qwen_runtime_status
 from openlens.retrieval import LocalRetriever, SearchHit, rrf_fuse
+from openlens.serverless_encoder import encode_payload
 from openlens.text import compose_search_text
 from openlens.video import expected_chunk_spans, is_still_frame_chunk
 
@@ -182,3 +183,19 @@ def test_audio_records_get_transcript_style_evidence_patches() -> None:
     assert "audio_caption" in kinds
     assert "audio_transcript_or_description" in kinds
     assert any("mission control" in patch.text for patch in patches)
+
+
+def test_serverless_encoder_returns_inline_feature_hash_record() -> None:
+    record = make_record("srv-1", "Serverless Mars report", "Patch vectors for a Mars PDF.", "pdf")
+    result = encode_payload(
+        {
+            "backend": "feature-hash",
+            "dimension": 32,
+            "records": [record.model_dump(mode="json")],
+            "return_records": True,
+        }
+    )
+    assert result["ok"] is True
+    assert result["count"] == 1
+    assert result["records"][0]["doc_id"] == "srv-1"
+    assert result["records"][0]["colbert_vectors"]
