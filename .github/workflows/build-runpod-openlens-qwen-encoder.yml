@@ -50,17 +50,22 @@ jobs:
           sudo rm -rf \
             /usr/share/dotnet \
             /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/local/.ghcup \
+            /usr/share/swift \
+            /opt/az \
             /opt/ghc \
             /opt/hostedtoolcache/CodeQL \
             /opt/hostedtoolcache/go \
             /opt/hostedtoolcache/node \
+            /opt/hostedtoolcache/Python \
+            /opt/hostedtoolcache/PyPy \
             /opt/hostedtoolcache/Ruby
           docker system prune -af || true
           sudo systemctl stop docker
+          sudo systemctl stop docker.socket || true
+          sudo rm -rf /mnt/docker /var/lib/docker
           sudo mkdir -p /mnt/docker
-          if [ -d /var/lib/docker ]; then
-            sudo rsync -a --delete /var/lib/docker/ /mnt/docker/
-          fi
           echo '{"data-root":"/mnt/docker"}' | sudo tee /etc/docker/daemon.json
           sudo systemctl start docker
           df -h
@@ -75,6 +80,8 @@ jobs:
           file: docker/runpod-openlens-qwen-encoder/Dockerfile
           platforms: linux/amd64
           push: true
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
