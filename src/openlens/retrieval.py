@@ -226,14 +226,13 @@ class OpenSearchRetriever:
             hits = self._vector(query, top_k, filters)
         else:
             hits = rrf_fuse([self._keyword(query, candidate_k, filters), self._vector(query, candidate_k, filters)], top_k)
-        facets = self._facet_counts(query, filters)
         return SearchResponse(
             query=query,
             mode=mode,
             retriever="opensearch",
             latency_ms=(time.perf_counter() - start) * 1000,
             hits=hits,
-            facets=facets,
+            facets=facet_counts([hit.doc for hit in hits]),
         )
 
     def _filters(self, modality: str | None, source: str | None) -> list[dict[str, Any]]:
@@ -275,31 +274,6 @@ class OpenSearchRetriever:
         body = {"size": top_k, "query": {"knn": {"vector": knn}}, "_source": {"excludes": ["vector"]}}
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "vector", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
-
-    def _facet_counts(self, query: str, filters: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
-        body = {
-            "size": 0,
-            "query": {
-                "bool": {
-                    "must": [
-                        {"multi_match": {"query": query, "fields": ["title^5", "summary^3", "body^2", "search_text"]}}
-                    ],
-                    "filter": filters,
-                }
-            },
-            "aggs": {
-                "modality": {"terms": {"field": "modality", "size": 12}},
-                "source": {"terms": {"field": "source", "size": 12}},
-            },
-        }
-        response = self.client.search(index=self.settings.opensearch_index, body=body)
-        return {
-            name: {
-                bucket["key"]: int(bucket["doc_count"])
-                for bucket in response.get("aggregations", {}).get(name, {}).get("buckets", [])
-            }
-            for name in ("modality", "source")
-        }
 
     def _hit_to_result(self, hit: dict[str, Any], rank: int, method: str, query: str) -> SearchHit:
         source = hit.get("_source", {})

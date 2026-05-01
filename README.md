@@ -75,6 +75,29 @@ uv run openlens-api
 
 Open http://localhost:8787.
 
+## API Surface
+
+```bash
+curl http://localhost:8787/api/status
+curl 'http://localhost:8787/api/search?q=satellite%20imagery%20climate%20change&mode=hybrid&top_k=5'
+```
+
+Near real-time ingest:
+
+```bash
+curl -X POST http://localhost:8787/api/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "Live smoke note on coral reef thermal stress",
+    "body": "Satellite thermal anomaly maps linked to coral bleaching risk.",
+    "modality": "document",
+    "source": "Verification note",
+    "tags": ["coral", "thermal"]
+  }'
+```
+
+With OpenSearch available, the API writes the record to JSONL for replay, indexes it into `openlens_multimodal`, uses `refresh=wait_for`, clears the app retriever cache, and makes it searchable immediately.
+
 ## Scaling Notes
 
 - Increase `number_of_shards` in `openlens.indexer.index_mapping()` for multi-node clusters.
@@ -90,3 +113,10 @@ Open http://localhost:8787.
 uv run pytest
 uv run ruff check .
 ```
+
+Verified locally on May 1, 2026 with OpenSearch 3.3.0:
+
+- `uv run openlens-build --limit-per-source 5` fetched 19 public records.
+- `uv run openlens-index` indexed 19 documents into `openlens_multimodal`.
+- `uv run openlens-smoke --query "satellite imagery climate change" --top-k 5` used the OpenSearch hybrid path.
+- `POST /api/ingest` inserted a live document and a follow-up search returned it as the top hit.
