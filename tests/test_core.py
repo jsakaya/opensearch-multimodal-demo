@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from openlens.config import Settings
+from openlens.api import InlineIngestRequest, inline_request_to_record
 from openlens.data import write_jsonl
 from openlens.embeddings import FeatureHashEmbedder
 from openlens.indexer import prepare_record
@@ -87,3 +88,18 @@ def test_local_retriever_filters_modalities(tmp_path) -> None:
     response = retriever.search("satellite smoke", modality="image")
     assert response.hits
     assert {hit.doc["modality"] for hit in response.hits} == {"image"}
+
+
+def test_inline_ingest_request_becomes_stable_record() -> None:
+    req = InlineIngestRequest(
+        title="Fresh field note",
+        body="A new observation about thermal satellite imagery.",
+        modality="document",
+        source="Notebook",
+        tags=["thermal"],
+    )
+    first = inline_request_to_record(req)
+    second = inline_request_to_record(req)
+    assert first.doc_id == second.doc_id
+    assert first.source == "Notebook"
+    assert "live" in first.tags
