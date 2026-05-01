@@ -1,6 +1,6 @@
 services:
   opensearch:
-    image: opensearchproject/opensearch:3.3.0
+    image: opensearchproject/opensearch:3.6.0
     container_name: openlens-opensearch
     environment:
       - cluster.name=openlens-cluster

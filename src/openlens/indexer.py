@@ -93,6 +93,8 @@ def index_mapping(dimension: int) -> dict[str, Any]:
                 "assets": {"type": "object", "enabled": False},
                 "patches": {"type": "object", "enabled": False},
                 "patch_vectors": {"type": "object", "enabled": False},
+                "colbert_vectors": {"type": "object", "enabled": False},
+                "patch_vector_count": {"type": "integer"},
                 "vector": {
                     "type": "knn_vector",
                     "dimension": dimension,
@@ -118,7 +120,9 @@ def prepare_record(record: OpenRecord, embedder: FeatureHashEmbedder) -> Indexed
         vector=vector,
         patches=patches,
         patch_vectors=patch_vectors,
+        colbert_vectors=patch_vectors,
         patch_count=len(patches),
+        patch_vector_count=len(patch_vectors),
         embedding_backend=getattr(embedder, "backend", "feature-hash"),
         embedding_model=getattr(embedder, "model_name", "feature-hash"),
         indexed_at=utc_now(),
@@ -165,6 +169,11 @@ def embed_and_optionally_index(
         batch_size=settings.qwen_batch_size,
         max_frames=settings.qwen_max_frames,
         fps=settings.qwen_fps,
+        colpali_batch_size=settings.colpali_batch_size,
+        colpali_model=settings.colpali_model,
+        colpali_max_pages=settings.colpali_max_pages,
+        colpali_max_patch_vectors=settings.colpali_max_patch_vectors,
+        colpali_image_timeout_s=settings.colpali_image_timeout_s,
     )
     indexed = prepare_records(records, embedder)
     write_jsonl(settings.embedded_docs_path, [record.model_dump(mode="json") for record in indexed])

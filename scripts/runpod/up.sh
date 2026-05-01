@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create a RunPod pod for OpenLens Qwen3-VL-Embedding encoding.
+# Create a RunPod pod for OpenLens ColPali/Qwen multimodal encoding.
 #
 # Required:
 #   RUNPOD_API_KEY, or a macOS Keychain item named runpod-api-key
@@ -7,7 +7,7 @@
 # Optional:
 #   RUNPOD_VOLUME_ID=t0ys2ffnll
 #   RUNPOD_VOLUME_NAME=josephsakaya-unsloth-h100
-#   RUNPOD_POD_NAME=openlens-qwen-h200
+#   RUNPOD_POD_NAME=openlens-colpali-h200
 #   RUNPOD_GPU_ID="NVIDIA H200"
 #   RUNPOD_DATA_CENTER_IDS=US-CA-2
 #   RUNPOD_IMAGE=ghcr.io/jsakaya/openlens-qwen-encoder:latest
@@ -17,7 +17,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 load_runpod_key
 
-NAME="${RUNPOD_POD_NAME:-openlens-qwen-h200}"
+NAME="${RUNPOD_POD_NAME:-openlens-colpali-h200}"
 GPU="${RUNPOD_GPU_ID:-${RUNPOD_GPU:-NVIDIA H200}}"
 DATA_CENTER_IDS="${RUNPOD_DATA_CENTER_IDS:-US-CA-2}"
 IMAGE="${RUNPOD_IMAGE:-ghcr.io/jsakaya/openlens-qwen-encoder:latest}"
@@ -38,12 +38,18 @@ fi
 
 ENV_JSON=$(PUBKEY="$PUBKEY" python3 <<'PY'
 import json, os
+backend = os.environ.get("OPENLENS_EMBEDDING_BACKEND", "colpali")
+default_dim = "4096" if backend == "qwen" else "128"
 print(json.dumps({
     "PUBLIC_KEY": os.environ["PUBKEY"],
     "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
-    "OPENLENS_EMBEDDING_BACKEND": "qwen",
+    "OPENLENS_EMBEDDING_BACKEND": backend,
     "OPENLENS_QWEN_MODEL": "qwen8b",
-    "OPENLENS_VECTOR_DIM": "4096",
+    "OPENLENS_COLPALI_MODEL": os.environ.get("OPENLENS_COLPALI_MODEL", "colpali-v1.3"),
+    "OPENLENS_VECTOR_DIM": os.environ.get("OPENLENS_VECTOR_DIM", default_dim),
+    "OPENLENS_COLPALI_BATCH_SIZE": os.environ.get("OPENLENS_COLPALI_BATCH_SIZE", "4"),
+    "OPENLENS_COLPALI_MAX_PAGES": os.environ.get("OPENLENS_COLPALI_MAX_PAGES", "1"),
+    "OPENLENS_COLPALI_MAX_PATCH_VECTORS": os.environ.get("OPENLENS_COLPALI_MAX_PATCH_VECTORS", "1024"),
     "OPENLENS_QWEN_BATCH_SIZE": os.environ.get("OPENLENS_QWEN_BATCH_SIZE", "16"),
     "OPENLENS_QWEN_MAX_FRAMES": os.environ.get("OPENLENS_QWEN_MAX_FRAMES", "64"),
     "OPENLENS_QWEN_FPS": os.environ.get("OPENLENS_QWEN_FPS", "1.0"),

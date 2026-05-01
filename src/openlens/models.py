@@ -77,7 +77,9 @@ class IndexedRecord(OpenRecord):
     vector: list[float]
     patches: list[Patch] = Field(default_factory=list)
     patch_vectors: list[list[float]] = Field(default_factory=list)
+    colbert_vectors: list[list[float]] = Field(default_factory=list)
     patch_count: int = 0
+    patch_vector_count: int = 0
     embedding_backend: str = "feature-hash"
     embedding_model: str = "feature-hash"
     indexed_at: str

@@ -6,7 +6,7 @@ OpenLens is a local-first OpenSearch demo for searching open multimodal records:
 - NASA STI Repository / NTRS technical PDF records and public document metadata.
 - NASA Exoplanet Archive TAP rows treated as SQL-style table documents.
 
-The demo indexes every item into one OpenSearch schema with BM25 fields, facets, a pooled HNSW `knn_vector`, and per-document patch vectors for late-interaction reranking. Retrieval runs as keyword, vector, RRF hybrid, or LIR patch rerank search. The code is designed so a tiny local corpus and a million-document corpus use the same ingestion/index contract.
+The demo indexes every item into one OpenSearch 3.6 schema with BM25 fields, facets, a pooled HNSW vector, and per-document multi-vectors for late-interaction reranking. Retrieval runs as keyword, vector, RRF hybrid, SQL, or LIR patch rerank search. The code is designed so a tiny local corpus and a million-document corpus use the same ingestion/index contract.
 
 ## Why This Shape
 
@@ -15,11 +15,11 @@ OpenSearch can combine classic inverted-index retrieval with vector search. This
 1. Normalize each modality into a shared `OpenRecord`.
 2. Compose searchable evidence from titles, captions, abstracts, transcripts/descriptions, table cells, tags, licenses, and asset metadata.
 3. Split each record into modality-aware patches: PDF/text pages, image captions/assets, video/audio chunks with timestamps, table cells, and mixed evidence.
-4. Store a pooled dense vector in `vector` for HNSW k-NN and keep `patch_vectors` for late-interaction scoring.
+4. Store a pooled dense vector in `vector` for HNSW k-NN and keep `patch_vectors` plus OpenSearch-docs-aligned `colbert_vectors` for late-interaction scoring.
 5. Use `refresh_interval=1s` and `refresh=wait_for`/`refresh=true` on small upserts for near real-time retrieval.
 6. Use streaming bulk indexing with deterministic IDs for scalable rebuilds and incremental replays.
 
-The default embedder is deterministic and local so the 10k demo can run anywhere. For native multimodal retrieval, set `OPENLENS_EMBEDDING_BACKEND=qwen` and use the Qwen3-VL-Embedding provider; `OPENLENS_QWEN_MODEL` can also point at a Qwen3.5-compatible local/HF model path once its processor exposes the same interface.
+The default embedder is deterministic and local so the 10k demo can run anywhere. For visual-document retrieval, set `OPENLENS_EMBEDDING_BACKEND=colpali` and use `vidore/colpali-v1.3-hf`; OpenLens stores the ColPali page/image token vectors in `colbert_vectors` and mean-pools them into the first-stage HNSW vector. The Qwen3-VL path remains available with `OPENLENS_EMBEDDING_BACKEND=qwen`.
 
 ## Data Sources
 
@@ -134,18 +134,24 @@ With OpenSearch available, the API writes the record to JSONL for replay, indexe
 - Split very large PDFs/transcripts into smaller patches or passage records that share `source_id`.
 - Add an ingest pipeline for production OCR, speech-to-text, PDF extraction, and neural sparse vectors.
 
-## Qwen / RunPod Encoder
+## ColPali / RunPod Encoder
 
-For the best GPU-native multimodal encoding on H100/H200:
+For the OpenSearch 3.6 ColPali late-interaction path on H100/H200:
 
 ```bash
-uv sync --extra qwen
-OPENLENS_EMBEDDING_BACKEND=qwen \
-OPENLENS_QWEN_MODEL=qwen8b \
-OPENLENS_VECTOR_DIM=4096 \
-OPENLENS_QWEN_BATCH_SIZE=16 \
-OPENLENS_QWEN_MAX_FRAMES=64 \
+uv sync --extra colpali
+OPENLENS_EMBEDDING_BACKEND=colpali \
+OPENLENS_COLPALI_MODEL=colpali-v1.3 \
+OPENLENS_VECTOR_DIM=128 \
+OPENLENS_COLPALI_BATCH_SIZE=4 \
+OPENLENS_COLPALI_MAX_PATCH_VECTORS=1024 \
 uv run openlens-index
+```
+
+Tune the GPU batch size:
+
+```bash
+uv run openlens-colpali-benchmark --model colpali-v1.3 --dimension 128 --max-batch 16
 ```
 
 The optional RunPod image lives in `docker/runpod-openlens-qwen-encoder/` and mirrors the QuickInsights Qwen3.5 fast-path setup:
@@ -153,10 +159,12 @@ The optional RunPod image lives in `docker/runpod-openlens-qwen-encoder/` and mi
 - CUDA 12.9 builder/runtime stages.
 - Prebuilt `/opt/venv` copied into the runtime image.
 - `PUBLIC_KEY` SSH bootstrap on port 22.
-- Build-time `verify_openlens_qwen.py`.
+- Build-time verification for Qwen, ColPali, PDF rendering, and OpenLens.
 - GHCR workflow: `.github/workflows/build-runpod-openlens-qwen-encoder.yml`.
 
 See `docs/runpod-gpu-plan.md` for the current `runpodctl` GPU/volume choice.
+On local macOS Python 3.13, the base demo works, but the Torch-backed ColPali
+and Qwen extras are intended for Python 3.10-3.12 or the RunPod CUDA image.
 
 Full-power RunPod demo path:
 
@@ -168,11 +176,11 @@ scripts/runpod/full-power-demo.sh
 ```
 
 `full-power-demo.sh` SSHes into the GPU pod, starts a single-node OpenSearch
-3.3 service if `OPENSEARCH_URL` is not already reachable, autotunes the Qwen
-batch size up to `OPENLENS_QWEN_MAX_BATCH=64`, builds the 10k NASA/space corpus,
-indexes full 4096-dimensional Qwen vectors and patch vectors into OpenSearch,
-starts the API, calls `POST /api/prewarm`, writes retrieval benchmark artifacts,
-and opens a local SSH tunnel. The browser URL prints as `http://127.0.0.1:8787`.
+3.6 service if `OPENSEARCH_URL` is not already reachable, autotunes the ColPali
+batch size, builds the 10k NASA/space corpus, indexes 128-dimensional pooled
+vectors plus ColPali multi-vectors into OpenSearch, starts the API, calls
+`POST /api/prewarm`, writes retrieval benchmark artifacts, and opens a local SSH
+tunnel. The browser URL prints as `http://127.0.0.1:8787`.
 
 Inside an already-running pod you can run the same remote sequence directly:
 
@@ -196,7 +204,7 @@ uv run pytest
 uv run ruff check .
 ```
 
-Verified locally on May 1, 2026 with OpenSearch 3.3.0:
+Verified locally on May 1, 2026 with OpenSearch 3.6.0:
 
 - `uv run openlens-build --limit-per-source 3 --output /tmp/openlens-nasa-small.jsonl` fetched 15 NASA records.
 - `uv run openlens-build --target-docs 10000 --query "artemis moon mars earth exoplanet hubble webb mission control"` builds the customer-facing NASA corpus.

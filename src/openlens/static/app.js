@@ -70,6 +70,11 @@ function embeddingLabel(payload) {
     const device = runtime.cuda_available ? runtime.device_name || "CUDA" : runtime.device || "no GPU";
     return `${payload.qwen_model || "qwen"} ${dim} · ${device}`;
   }
+  if (backend === "colpali") {
+    const runtime = payload.colpali_runtime || {};
+    const device = runtime.cuda_available ? runtime.device_name || "CUDA" : runtime.device || "no GPU";
+    return `${payload.colpali_model || "ColPali"} ${dim} · ${device}`;
+  }
   return `${backend} ${dim}`.trim();
 }
 
@@ -155,7 +160,9 @@ function renderResults() {
     card.className = `result-card ${state.activeId === hit.doc_id ? "is-active" : ""}`;
     card.dataset.modality = hit.modality || "document";
     const thumb = firstThumb(hit);
-    const patchLabel = hit.patch_count ? `${hit.patch_count} patches` : "single vector";
+    const patchLabel = hit.patch_vector_count && hit.patch_vector_count > hit.patch_count
+      ? `${hit.patch_count} patches · ${hit.patch_vector_count} vectors`
+      : hit.patch_count ? `${hit.patch_count} patches` : "single vector";
     card.innerHTML = `
       <div class="modality-rail"></div>
       <div class="result-body">
@@ -209,6 +216,7 @@ function renderDetail(hit) {
     <div class="detail-meta">${esc(hit.modality)} &middot; ${esc(hit.source)} &middot; ${esc(hit.license)}</div>
     <div class="embedding-strip">
       <span>${esc(hit.patch_count || 0)} patches</span>
+      <span>${esc(hit.patch_vector_count || 0)} vectors</span>
       <span>${esc(hit.embedding_backend || "feature-hash")}</span>
       <span>${esc(hit.embedding_model || "feature-hash")}</span>
     </div>

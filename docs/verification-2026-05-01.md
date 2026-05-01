@@ -1,6 +1,8 @@
 # Verification 2026-05-01
 
-Local OpenSearch 3.3.0 was rebuilt with the NASA customer-demo corpus.
+Local OpenSearch 3.6.0 was rebuilt with the NASA customer-demo corpus after the
+ColPali field/path upgrade. The committed benchmark below is still the local
+feature-hash baseline; the H100/H200 path now supports `OPENLENS_EMBEDDING_BACKEND=colpali`.
 
 ## Corpus Build
 
@@ -81,9 +83,9 @@ Summary:
 
 | Slice | n | p50 ms | p95 ms | exact@k | modality@1 | modality@3 |
 |---|---:|---:|---:|---:|---:|---:|
-| all | 366 | 25.66 | 107.10 | 93.00% | 86.07% | 94.26% |
-| hybrid | 90 | 68.92 | 178.98 | 96.00% | 90.00% | 96.67% |
-| keyword | 90 | 8.31 | 25.52 | 92.00% | 90.00% | 96.67% |
-| lir | 90 | 42.41 | 107.09 | 92.00% | 83.33% | 93.33% |
-| vector | 90 | 5.21 | 9.43 | 92.00% | 80.00% | 90.00% |
-| sql | 6 | 9.26 | 15.87 | 0.00% | 100.00% | 100.00% |
+| all | 366 | 41.12 | 197.52 | 96.00% | 87.70% | 95.90% |
+| hybrid | 90 | 97.20 | 223.66 | 96.00% | 90.00% | 96.67% |
+| keyword | 90 | 13.09 | 31.35 | 92.00% | 90.00% | 96.67% |
+| lir | 90 | 72.19 | 199.67 | 96.00% | 83.33% | 93.33% |
+| vector | 90 | 8.68 | 16.21 | 100.00% | 86.67% | 96.67% |
+| sql | 6 | 16.65 | 318.17 | 0.00% | 100.00% | 100.00% |

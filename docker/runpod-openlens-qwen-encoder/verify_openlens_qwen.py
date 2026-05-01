@@ -11,14 +11,18 @@ REQUIRED_DISTS = (
     "openlens-opensearch-demo",
     "transformers",
     "qwen-vl-utils",
+    "pypdfium2",
     "torch",
     "accelerate",
 )
 
 REQUIRED_MODULES = (
     "openlens.qwen_embedder",
+    "openlens.colpali_embedder",
     "qwen_vl_utils",
     "transformers.models.qwen3_vl",
+    "transformers.models.colpali",
+    "pypdfium2",
 )
 
 
@@ -56,9 +60,9 @@ if missing_modules:
 
 if not torch.cuda.is_available():
     if os.environ.get("OPENLENS_QWEN_VERIFY_ALLOW_NO_GPU") == "1":
-        print("openlens_qwen_encoder: deferred until a CUDA device is visible")
+        print("openlens_multimodal_encoder: deferred until a CUDA device is visible")
         raise SystemExit(0)
     raise SystemExit("CUDA device is unavailable")
 
 print(f"gpu_name: {torch.cuda.get_device_name(0)}")
-print("openlens_qwen_encoder: ready")
+print("openlens_multimodal_encoder: ready")

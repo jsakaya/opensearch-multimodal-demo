@@ -24,13 +24,13 @@ Recommended default for this demo: `NVIDIA H200` in `US-CA-2`.
 Why:
 
 - It keeps the pod near the existing `US-CA-2` network volume.
-- It gives substantially more VRAM than H100 SXM for Qwen embedding/reranking
-  batch size tuning.
+- It gives substantially more VRAM than H100 SXM for ColPali page/image
+  multi-vector encoding, Qwen embedding, and reranking batch size tuning.
 - `runpodctl datacenter list` showed `H200 SXM` available in `US-CA-2` while
   several H100/B200 options were low stock.
 - It is safer than jumping to B200 for this image because the current container
-  path is already validated on CUDA 12.9 / PyTorch / Qwen modules and H100/H200
-  is the least surprising production demo target.
+  path is already validated on CUDA 12.9 / PyTorch / Qwen/ColPali modules and
+  H100/H200 is the least surprising production demo target.
 
 Override knobs:
 
@@ -50,5 +50,4 @@ scripts/runpod/up.sh
 ```
 
 Do that only after the H200 path is clean, because the B200 stock was low and the
-demo does not need 180 GB VRAM to show Qwen3-VL-Embedding-8B strongly.
-
+demo does not need 180 GB VRAM to show ColPali late interaction strongly.

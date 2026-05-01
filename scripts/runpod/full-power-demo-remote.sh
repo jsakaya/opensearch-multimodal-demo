@@ -8,9 +8,19 @@ export OPENLENS_DOCS="${OPENLENS_DOCS:-$OPENLENS_DATA_DIR/open_corpus.jsonl}"
 export OPENLENS_EMBEDDED_DOCS="${OPENLENS_EMBEDDED_DOCS:-$OPENLENS_DATA_DIR/open_corpus_embedded.jsonl}"
 export OPENSEARCH_URL="${OPENSEARCH_URL:-http://127.0.0.1:9200}"
 export OPENSEARCH_INDEX="${OPENSEARCH_INDEX:-openlens_multimodal}"
-export OPENLENS_EMBEDDING_BACKEND="${OPENLENS_EMBEDDING_BACKEND:-qwen}"
+export OPENLENS_EMBEDDING_BACKEND="${OPENLENS_EMBEDDING_BACKEND:-colpali}"
 export OPENLENS_QWEN_MODEL="${OPENLENS_QWEN_MODEL:-qwen8b}"
-export OPENLENS_VECTOR_DIM="${OPENLENS_VECTOR_DIM:-4096}"
+export OPENLENS_COLPALI_MODEL="${OPENLENS_COLPALI_MODEL:-colpali-v1.3}"
+if [[ -z "${OPENLENS_VECTOR_DIM:-}" ]]; then
+  if [[ "$OPENLENS_EMBEDDING_BACKEND" == "qwen" ]]; then
+    export OPENLENS_VECTOR_DIM=4096
+  else
+    export OPENLENS_VECTOR_DIM=128
+  fi
+fi
+export OPENLENS_COLPALI_BATCH_SIZE="${OPENLENS_COLPALI_BATCH_SIZE:-4}"
+export OPENLENS_COLPALI_MAX_PAGES="${OPENLENS_COLPALI_MAX_PAGES:-1}"
+export OPENLENS_COLPALI_MAX_PATCH_VECTORS="${OPENLENS_COLPALI_MAX_PATCH_VECTORS:-1024}"
 export OPENLENS_QWEN_MAX_FRAMES="${OPENLENS_QWEN_MAX_FRAMES:-64}"
 export OPENLENS_QWEN_FPS="${OPENLENS_QWEN_FPS:-1.0}"
 export OPENLENS_REQUIRE_OPENSEARCH=1
@@ -22,7 +32,7 @@ ensure_opensearch() {
     return
   fi
 
-  local version="${OPENLENS_OPENSEARCH_VERSION:-3.3.0}"
+  local version="${OPENLENS_OPENSEARCH_VERSION:-3.6.0}"
   local os_home="${OPENLENS_OPENSEARCH_HOME:-/workspace/opensearch-$version}"
   local tarball="${OPENLENS_OPENSEARCH_TARBALL:-https://artifacts.opensearch.org/releases/bundle/opensearch/$version/opensearch-$version-linux-x64.tar.gz}"
 
@@ -37,8 +47,8 @@ ensure_opensearch() {
     useradd -m -d /workspace/openlens-os-home -s /bin/bash openlens-os
   fi
   cat >"$os_home/config/opensearch.yml" <<EOF
-cluster.name: openlens-h100
-node.name: openlens-h100-1
+cluster.name: openlens-gpu
+node.name: openlens-gpu-1
 discovery.type: single-node
 network.host: 127.0.0.1
 http.port: 9200
@@ -64,7 +74,25 @@ EOF
   exit 1
 }
 
-autotune_qwen() {
+autotune_embedding() {
+  if [[ "$OPENLENS_EMBEDDING_BACKEND" == "colpali" ]]; then
+    if [[ "${OPENLENS_AUTOTUNE_COLPALI:-1}" != "1" ]]; then
+      return
+    fi
+    local log="$OPENLENS_DATA_DIR/colpali-benchmark.log"
+    echo "autotuning ColPali batch size on the GPU..."
+    openlens-colpali-benchmark \
+      --model "$OPENLENS_COLPALI_MODEL" \
+      --dimension "$OPENLENS_VECTOR_DIM" \
+      --max-patch-vectors "$OPENLENS_COLPALI_MAX_PATCH_VECTORS" \
+      --max-batch "${OPENLENS_COLPALI_MAX_BATCH:-16}" | tee "$log"
+    local tuned
+    tuned="$(awk -F= '/OPENLENS_COLPALI_BATCH_SIZE=/{print $2}' "$log" | tail -1)"
+    export OPENLENS_COLPALI_BATCH_SIZE="${tuned:-$OPENLENS_COLPALI_BATCH_SIZE}"
+    echo "using OPENLENS_COLPALI_BATCH_SIZE=$OPENLENS_COLPALI_BATCH_SIZE"
+    return
+  fi
+
   if [[ "${OPENLENS_AUTOTUNE_QWEN:-1}" != "1" ]]; then
     export OPENLENS_QWEN_BATCH_SIZE="${OPENLENS_QWEN_BATCH_SIZE:-16}"
     return
@@ -106,9 +134,9 @@ start_api() {
 }
 
 ensure_opensearch
-autotune_qwen
+autotune_embedding
 build_corpus
-echo "embedding and indexing full 4096d Qwen vectors into OpenSearch..."
+echo "embedding and indexing $OPENLENS_EMBEDDING_BACKEND vectors into OpenSearch..."
 openlens-index --input "$OPENLENS_DOCS"
 start_api
 openlens-benchmark \

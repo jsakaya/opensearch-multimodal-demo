@@ -26,7 +26,14 @@ qwen = [
     "accelerate>=1.1.0",
     "pillow>=11.0.0",
     "qwen-vl-utils>=0.0.14",
-    "torch>=2.4.0",
+    "torch>=2.4.0; python_version < '3.13'",
+    "transformers>=4.57.0",
+]
+colpali = [
+    "accelerate>=1.1.0",
+    "pillow>=11.0.0",
+    "pypdfium2>=4.30.0",
+    "torch>=2.4.0; python_version < '3.13'",
     "transformers>=4.57.0",
 ]
 
@@ -35,6 +42,7 @@ openlens-api = "openlens.api:main"
 openlens-build = "openlens.scripts.build_open_corpus:main"
 openlens-benchmark = "openlens.scripts.benchmark_retrieval:main"
 openlens-index = "openlens.scripts.index_open_corpus:main"
+openlens-colpali-benchmark = "openlens.scripts.benchmark_colpali:main"
 openlens-qwen-benchmark = "openlens.scripts.benchmark_qwen:main"
 openlens-smoke = "openlens.scripts.smoke_demo:main"
 

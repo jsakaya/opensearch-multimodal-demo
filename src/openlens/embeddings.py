@@ -114,19 +114,28 @@ class FeatureHashEmbedder:
 
         add("record_header", f"{record.title}. {record.summary}")
         if record.modality in {"pdf", "document"}:
+            pdf_asset_url = next((asset.url for asset in record.assets if asset.url), "")
             for idx, chunk in enumerate(chunk_text(record.body or record.summary, patch_chars)):
-                add("pdf_page_patch" if record.modality == "pdf" else "text_patch", chunk, page=idx + 1)
+                add(
+                    "pdf_page_patch" if record.modality == "pdf" else "text_patch",
+                    chunk,
+                    page=idx + 1,
+                    asset_url=pdf_asset_url if record.modality == "pdf" else "",
+                )
         elif record.modality == "image":
             add("visual_caption", f"{record.title}. {record.summary}. {' '.join(record.tags)}")
             for asset in record.assets[:3]:
+                image_url = asset.thumbnail_url or asset.url
                 add(
                     "visual_asset",
-                    f"{asset.kind} {asset.mime_type} width {asset.width} height {asset.height} {asset.url}",
-                    asset_url=asset.url,
+                    f"{asset.kind} {asset.mime_type} width {asset.width} height {asset.height} {image_url}",
+                    asset_url=image_url,
                 )
         elif record.modality == "video":
             chunks = chunk_text(record.body or record.summary or record.title, patch_chars) or [record.title]
             duration_s = next((asset.duration_s for asset in record.assets if asset.duration_s), None)
+            video_asset = record.assets[0] if record.assets else None
+            video_asset_url = (video_asset.thumbnail_url or video_asset.url) if video_asset else ""
             spans = expected_chunk_spans(duration_s or len(chunks) * 30, chunk_duration_s=30, overlap_s=5)
             for idx, chunk in enumerate(chunks):
                 span = spans[min(idx, len(spans) - 1)]
@@ -136,7 +145,7 @@ class FeatureHashEmbedder:
                     page=idx + 1,
                     start_s=span.start_s,
                     end_s=span.end_s,
-                    asset_url=record.assets[0].url if record.assets else "",
+                    asset_url=video_asset_url,
                 )
         elif record.modality == "audio":
             audio_context = audio_evidence_text(record)

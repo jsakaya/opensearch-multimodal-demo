@@ -24,7 +24,7 @@ def qwen_runtime_status() -> dict[str, Any]:
     """Return lightweight Torch/CUDA state without loading a Qwen checkpoint."""
     try:
         import torch
-    except ImportError as exc:
+    except Exception as exc:
         return {
             "torch_available": False,
             "cuda_available": False,
@@ -96,7 +96,7 @@ class QwenMultimodalEmbedder(FeatureHashEmbedder):
             import torch.nn.functional as F  # noqa: F401
             from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLConfig, Qwen3VLModel, Qwen3VLPreTrainedModel
             from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor
-        except ImportError as exc:
+        except Exception as exc:
             raise QwenEmbedderError(
                 "Qwen multimodal embedding dependencies are missing. "
                 "Install with `uv sync --extra qwen`."
@@ -277,6 +277,11 @@ def make_embedder(
     batch_size: int = 1,
     max_frames: int = 32,
     fps: float = 1.0,
+    colpali_batch_size: int = 2,
+    colpali_model: str = "",
+    colpali_max_pages: int = 1,
+    colpali_max_patch_vectors: int = 1024,
+    colpali_image_timeout_s: float = 20,
 ) -> FeatureHashEmbedder:
     if backend == "qwen":
         return QwenMultimodalEmbedder(
@@ -285,5 +290,16 @@ def make_embedder(
             batch_size=batch_size,
             max_frames=max_frames,
             fps=fps,
+        )
+    if backend == "colpali":
+        from .colpali_embedder import ColPaliEmbedder
+
+        return ColPaliEmbedder(
+            model_name=colpali_model or os.getenv("OPENLENS_COLPALI_MODEL", "colpali-v1.3"),
+            dimension=dimension,
+            batch_size=colpali_batch_size,
+            max_pages=colpali_max_pages,
+            max_patch_vectors=colpali_max_patch_vectors,
+            image_timeout_s=colpali_image_timeout_s,
         )
     return FeatureHashEmbedder(dimension=dimension)

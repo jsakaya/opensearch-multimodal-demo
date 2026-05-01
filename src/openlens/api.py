@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import get_settings
+from .colpali_embedder import ColPaliEmbedderError, colpali_runtime_status
 from .data import append_or_replace_jsonl, stable_id
 from .indexer import bulk_index, check_status, make_client, prepare_record, recreate_index
 from .models import Asset, Modality, OpenRecord
@@ -114,11 +115,17 @@ def status() -> dict[str, Any]:
         "local_docs_available": settings.docs_path.exists() or settings.embedded_docs_path.exists(),
         "vector_dim": settings.vector_dim,
         "embedding_backend": settings.embedding_backend,
+        "embedding_model": _embedding_model_label(settings),
         "qwen_model": settings.qwen_model,
         "qwen_batch_size": settings.qwen_batch_size,
         "qwen_max_frames": settings.qwen_max_frames,
         "qwen_fps": settings.qwen_fps,
         "qwen_runtime": qwen_runtime_status(),
+        "colpali_model": settings.colpali_model,
+        "colpali_batch_size": settings.colpali_batch_size,
+        "colpali_max_pages": settings.colpali_max_pages,
+        "colpali_max_patch_vectors": settings.colpali_max_patch_vectors,
+        "colpali_runtime": colpali_runtime_status(),
         "require_opensearch": settings.require_opensearch,
     }
 
@@ -130,9 +137,9 @@ def prewarm() -> dict[str, Any]:
     try:
         retriever = cached_retriever(True)
         query_vectors = retriever.embedder.embed_query_patches(
-            "warm up Qwen multimodal retrieval for OpenSearch hybrid vector LIR search"
+            "warm up ColPali and Qwen multimodal retrieval for OpenSearch hybrid vector LIR search"
         )
-    except (RuntimeError, QwenEmbedderError) as exc:
+    except (RuntimeError, QwenEmbedderError, ColPaliEmbedderError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     vector_dim = len(query_vectors[0]) if query_vectors else 0
     return {
@@ -140,12 +147,15 @@ def prewarm() -> dict[str, Any]:
         "latency_ms": round((time.perf_counter() - started) * 1000, 2),
         "retriever": type(retriever).__name__,
         "embedding_backend": settings.embedding_backend,
-        "embedding_model": settings.qwen_model if settings.embedding_backend == "qwen" else "feature-hash",
+        "embedding_model": _embedding_model_label(settings),
         "vector_dim": vector_dim,
         "query_vectors": len(query_vectors),
         "qwen_batch_size": settings.qwen_batch_size,
         "qwen_max_frames": settings.qwen_max_frames,
         "qwen_runtime": qwen_runtime_status(),
+        "colpali_batch_size": settings.colpali_batch_size,
+        "colpali_model": settings.colpali_model,
+        "colpali_runtime": colpali_runtime_status(),
     }
 
 
@@ -164,6 +174,14 @@ def examples() -> dict[str, Any]:
         "modes": ["hybrid", "keyword", "vector", "lir", "sql"],
         "modalities": ["image", "pdf", "document", "video", "audio", "table"],
     }
+
+
+def _embedding_model_label(settings: Any) -> str:
+    if settings.embedding_backend == "qwen":
+        return settings.qwen_model
+    if settings.embedding_backend == "colpali":
+        return settings.colpali_model
+    return "feature-hash"
 
 
 @app.get("/api/search")
@@ -200,6 +218,11 @@ def ingest(req: InlineIngestRequest, prefer_opensearch: bool = True) -> dict[str
         batch_size=settings.qwen_batch_size,
         max_frames=settings.qwen_max_frames,
         fps=settings.qwen_fps,
+        colpali_batch_size=settings.colpali_batch_size,
+        colpali_model=settings.colpali_model,
+        colpali_max_pages=settings.colpali_max_pages,
+        colpali_max_patch_vectors=settings.colpali_max_patch_vectors,
+        colpali_image_timeout_s=settings.colpali_image_timeout_s,
     )
     indexed = prepare_record(record, embedder)
 

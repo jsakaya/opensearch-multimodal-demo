@@ -156,6 +156,21 @@ def test_qwen_defaults_to_full_embedding_dimension(monkeypatch) -> None:
     assert Settings().vector_dim == 4096
 
 
+def test_colpali_defaults_to_late_interaction_dimension(monkeypatch) -> None:
+    monkeypatch.setenv("OPENLENS_EMBEDDING_BACKEND", "colpali")
+    monkeypatch.delenv("OPENLENS_VECTOR_DIM", raising=False)
+    assert Settings().vector_dim == 128
+
+
+def test_index_records_expose_colbert_vectors_for_opensearch_lir() -> None:
+    record = make_record("pdf-colpali", "Visual technical report", "A chart-heavy PDF page about Mars ascent.", "pdf")
+    record.assets = [Asset(kind="pdf", url="https://example.test/report.pdf", mime_type="application/pdf")]
+    indexed = prepare_record(record, FeatureHashEmbedder(64))
+    assert indexed.colbert_vectors == indexed.patch_vectors
+    assert indexed.patch_vector_count == len(indexed.patch_vectors)
+    assert any(patch.asset_url.endswith("report.pdf") for patch in indexed.patches if patch.kind.startswith("pdf"))
+
+
 def test_audio_records_get_transcript_style_evidence_patches() -> None:
     record = make_record("aud-1", "Apollo mission control audio", "A catalog description of launch audio.", "audio")
     record.facets["subjects"] = ["mission control", "rocket launch"]

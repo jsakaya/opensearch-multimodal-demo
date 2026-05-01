@@ -19,8 +19,11 @@ def _path_from_env(name: str, default: str) -> Path:
 def _vector_dim_from_env() -> int:
     if os.getenv("OPENLENS_VECTOR_DIM"):
         return int(os.environ["OPENLENS_VECTOR_DIM"])
-    if os.getenv("OPENLENS_EMBEDDING_BACKEND") == "qwen":
+    backend = os.getenv("OPENLENS_EMBEDDING_BACKEND")
+    if backend == "qwen":
         return 4096
+    if backend == "colpali":
+        return 128
     return 384
 
 
@@ -40,6 +43,15 @@ class Settings:
     qwen_batch_size: int = field(default_factory=lambda: int(os.getenv("OPENLENS_QWEN_BATCH_SIZE", "1")))
     qwen_max_frames: int = field(default_factory=lambda: int(os.getenv("OPENLENS_QWEN_MAX_FRAMES", "32")))
     qwen_fps: float = field(default_factory=lambda: float(os.getenv("OPENLENS_QWEN_FPS", "1.0")))
+    colpali_model: str = field(default_factory=lambda: os.getenv("OPENLENS_COLPALI_MODEL", "colpali-v1.3"))
+    colpali_batch_size: int = field(default_factory=lambda: int(os.getenv("OPENLENS_COLPALI_BATCH_SIZE", "2")))
+    colpali_max_pages: int = field(default_factory=lambda: int(os.getenv("OPENLENS_COLPALI_MAX_PAGES", "1")))
+    colpali_max_patch_vectors: int = field(
+        default_factory=lambda: int(os.getenv("OPENLENS_COLPALI_MAX_PATCH_VECTORS", "1024"))
+    )
+    colpali_image_timeout_s: float = field(
+        default_factory=lambda: float(os.getenv("OPENLENS_COLPALI_IMAGE_TIMEOUT_S", "20"))
+    )
     require_opensearch: bool = field(default_factory=lambda: os.getenv("OPENLENS_REQUIRE_OPENSEARCH", "1") != "0")
     docs_path: Path = field(default_factory=lambda: _path_from_env("OPENLENS_DOCS", "data/processed/open_corpus.jsonl"))
     embedded_docs_path: Path = field(

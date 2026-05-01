@@ -53,6 +53,7 @@ class SearchHit:
             "assets": self.doc.get("assets") or [],
             "patches": self.doc.get("patches") or [],
             "patch_count": self.doc.get("patch_count") or len(self.doc.get("patches") or []),
+            "patch_vector_count": self.doc.get("patch_vector_count") or len(_late_vectors(self.doc, "patch_vectors")),
             "embedding_backend": self.doc.get("embedding_backend"),
             "embedding_model": self.doc.get("embedding_model"),
         }
@@ -125,6 +126,11 @@ class LocalRetriever:
             batch_size=settings.qwen_batch_size,
             max_frames=settings.qwen_max_frames,
             fps=settings.qwen_fps,
+            colpali_batch_size=settings.colpali_batch_size,
+            colpali_model=settings.colpali_model,
+            colpali_max_pages=settings.colpali_max_pages,
+            colpali_max_patch_vectors=settings.colpali_max_patch_vectors,
+            colpali_image_timeout_s=settings.colpali_image_timeout_s,
         )
         path = settings.embedded_docs_path if settings.embedded_docs_path.exists() else settings.docs_path
         rows = read_jsonl(path)
@@ -222,9 +228,9 @@ class LocalRetriever:
             top_k=min(candidate_k, len(docs)),
         )
         query_vectors = self.embedder.embed_query_patches(query)
-        scored: list[tuple[float, SearchHit, dict[str, Any]]] = []
+        scored: list[tuple[float, SearchHit]] = []
         for candidate in candidates:
-            doc_vectors = candidate.doc.get("patch_vectors") or []
+            doc_vectors = _late_vectors(candidate.doc, _late_vector_field(self.settings.embedding_backend))
             score = late_interaction_score(query_vectors, doc_vectors)
             if score <= 0:
                 score = candidate.score
@@ -269,6 +275,11 @@ class OpenSearchRetriever:
             batch_size=settings.qwen_batch_size,
             max_frames=settings.qwen_max_frames,
             fps=settings.qwen_fps,
+            colpali_batch_size=settings.colpali_batch_size,
+            colpali_model=settings.colpali_model,
+            colpali_max_pages=settings.colpali_max_pages,
+            colpali_max_patch_vectors=settings.colpali_max_patch_vectors,
+            colpali_image_timeout_s=settings.colpali_image_timeout_s,
         )
 
     def search(
@@ -327,7 +338,7 @@ class OpenSearchRetriever:
                 }
             },
             "highlight": {"fields": {"title": {}, "summary": {}, "body": {}, "search_text": {}}},
-            "_source": {"excludes": ["vector", "patch_vectors"]},
+            "_source": {"excludes": ["vector", "patch_vectors", "colbert_vectors"]},
         }
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "keyword", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
@@ -337,7 +348,11 @@ class OpenSearchRetriever:
         knn: dict[str, Any] = {"vector": vector, "k": top_k}
         if filters:
             knn["filter"] = {"bool": {"filter": filters}}
-        body = {"size": top_k, "query": {"knn": {"vector": knn}}, "_source": {"excludes": ["vector", "patch_vectors"]}}
+        body = {
+            "size": top_k,
+            "query": {"knn": {"vector": knn}},
+            "_source": {"excludes": ["vector", "patch_vectors", "colbert_vectors"]},
+        }
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "vector", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
 
@@ -365,7 +380,7 @@ class OpenSearchRetriever:
                 }
             },
             "highlight": {"fields": {"title": {}, "summary": {}, "body": {}, "search_text": {}}},
-            "_source": {"excludes": ["vector", "patch_vectors"]},
+            "_source": {"excludes": ["vector", "patch_vectors", "colbert_vectors"]},
         }
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "sql", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
@@ -399,7 +414,9 @@ class OpenSearchRetriever:
                 "patches": [],
                 "patch_count": 0,
                 "embedding_backend": self.settings.embedding_backend,
-                "embedding_model": self.settings.qwen_model,
+                "embedding_model": self.settings.colpali_model
+                if self.settings.embedding_backend == "colpali"
+                else self.settings.qwen_model,
             }
             hits.append(SearchHit(doc_id, rank, 1.0 / rank, "sql", doc, str(table)[:360], {"sql": 1.0 / rank}))
         return hits
@@ -407,10 +424,11 @@ class OpenSearchRetriever:
     def _lir(self, query: str, top_k: int, candidate_k: int, filters: list[dict[str, Any]]) -> list[SearchHit]:
         query_vectors = self.embedder.embed_query_patches(query)
         query_vector = mean_pool(query_vectors, self.embedder.dimension)
+        vector_field = _late_vector_field(self.settings.embedding_backend)
         try:
-            return self._native_lir(query, query_vector, query_vectors, top_k, candidate_k, filters)
+            return self._native_lir(query, query_vector, query_vectors, top_k, candidate_k, filters, vector_field)
         except Exception:
-            return self._client_lir(query, query_vectors, top_k, candidate_k, filters)
+            return self._client_lir(query, query_vectors, top_k, candidate_k, filters, vector_field)
 
     def _native_lir(
         self,
@@ -420,6 +438,7 @@ class OpenSearchRetriever:
         top_k: int,
         candidate_k: int,
         filters: list[dict[str, Any]],
+        vector_field: str,
     ) -> list[SearchHit]:
         knn: dict[str, Any] = {"vector": query_vector, "k": candidate_k}
         if filters:
@@ -436,14 +455,14 @@ class OpenSearchRetriever:
                         "script_score": {
                             "query": {"match_all": {}},
                             "script": {
-                                "source": "lateInteractionScore(params.query_vector, 'patch_vectors', params._source)",
+                                "source": f"lateInteractionScore(params.query_vector, '{vector_field}', params._source)",
                                 "params": {"query_vector": query_vectors},
                             },
                         }
                     },
                 },
             },
-            "_source": {"excludes": ["vector", "patch_vectors"]},
+            "_source": {"excludes": ["vector", "patch_vectors", "colbert_vectors"]},
         }
         response = self.client.search(index=self.settings.opensearch_index, body=body, request_timeout=120)
         return [self._hit_to_result(hit, rank, "lir", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
@@ -455,6 +474,7 @@ class OpenSearchRetriever:
         top_k: int,
         candidate_k: int,
         filters: list[dict[str, Any]],
+        vector_field: str,
     ) -> list[SearchHit]:
         candidates = rrf_fuse([self._keyword(query, candidate_k, filters), self._vector(query, candidate_k, filters)], candidate_k)
         ids = [hit.doc_id for hit in candidates]
@@ -466,10 +486,10 @@ class OpenSearchRetriever:
             for row in response.get("docs", [])
             if row.get("found")
         }
-        scored: list[tuple[float, SearchHit]] = []
+        scored: list[tuple[float, SearchHit, dict[str, Any]]] = []
         for candidate in candidates:
             doc = docs_by_id.get(candidate.doc_id, candidate.doc)
-            score = late_interaction_score(query_vectors, doc.get("patch_vectors") or [])
+            score = late_interaction_score(query_vectors, _late_vectors(doc, vector_field))
             if score <= 0:
                 score = candidate.score
             scored.append((score, candidate, doc))
@@ -526,6 +546,15 @@ def best_patch_excerpt(query: str, doc: dict[str, Any]) -> str:
     elif best.get("page") is not None:
         label = f"{label} p{best['page']}"
     return f"{label}: {excerpt_for(query, best.get('text') or '')}"
+
+
+def _late_vector_field(backend: str) -> str:
+    return "colbert_vectors" if backend == "colpali" else "patch_vectors"
+
+
+def _late_vectors(doc: dict[str, Any], preferred_field: str) -> list[list[float]]:
+    vectors = doc.get(preferred_field) or doc.get("patch_vectors") or doc.get("colbert_vectors") or []
+    return vectors if isinstance(vectors, list) else []
 
 
 def _is_sql_statement(query: str) -> bool:
