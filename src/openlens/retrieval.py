@@ -10,13 +10,14 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 from .config import Settings
 from .data import read_jsonl
-from .embeddings import FeatureHashEmbedder
+from .embeddings import late_interaction_score, mean_pool
 from .indexer import check_status, make_client, prepare_record
 from .models import OpenRecord
+from .qwen_embedder import make_embedder
 from .text import excerpt_for
 
 
-SearchMode = Literal["hybrid", "keyword", "vector"]
+SearchMode = Literal["hybrid", "keyword", "vector", "lir"]
 
 
 @dataclass
@@ -50,6 +51,10 @@ class SearchHit:
             "facets": self.doc.get("facets") or {},
             "table": self.doc.get("table") or {},
             "assets": self.doc.get("assets") or [],
+            "patches": self.doc.get("patches") or [],
+            "patch_count": self.doc.get("patch_count") or len(self.doc.get("patches") or []),
+            "embedding_backend": self.doc.get("embedding_backend"),
+            "embedding_model": self.doc.get("embedding_model"),
         }
 
 
@@ -113,7 +118,7 @@ def facet_counts(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
 class LocalRetriever:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.embedder = FeatureHashEmbedder(settings.vector_dim)
+        self.embedder = make_embedder(settings.embedding_backend, settings.vector_dim, settings.qwen_model)
         path = settings.embedded_docs_path if settings.embedded_docs_path.exists() else settings.docs_path
         rows = read_jsonl(path)
         self.docs: list[dict[str, Any]] = []
@@ -123,6 +128,7 @@ class LocalRetriever:
             else:
                 record = prepare_record(OpenRecord.model_validate(row), self.embedder)
                 self.docs.append(record.model_dump(mode="json"))
+        self.doc_positions = {id(doc): index for index, doc in enumerate(self.docs)}
         self.texts = [doc.get("search_text") or "" for doc in self.docs]
         self.vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), max_features=50000)
         self.tfidf = self.vectorizer.fit_transform(self.texts) if self.texts else None
@@ -142,6 +148,8 @@ class LocalRetriever:
             hits = self._keyword(query, docs, top_k)
         elif mode == "vector":
             hits = self._vector(query, docs, top_k)
+        elif mode == "lir":
+            hits = self._lir(query, docs, top_k, candidate_k)
         else:
             hits = rrf_fuse(
                 [
@@ -170,7 +178,7 @@ class LocalRetriever:
     def _keyword(self, query: str, docs: list[dict[str, Any]], top_k: int) -> list[SearchHit]:
         if not docs or self.tfidf is None:
             return []
-        doc_indexes = [self.docs.index(doc) for doc in docs]
+        doc_indexes = [self.doc_positions[id(doc)] for doc in docs]
         q = self.vectorizer.transform([query])
         scores = (self.tfidf[doc_indexes] @ q.T).toarray().ravel()
         order = np.argsort(scores)[::-1][:top_k]
@@ -191,6 +199,41 @@ class LocalRetriever:
         order = np.argsort(np.asarray(scores))[::-1][:top_k]
         return [self._result(docs[int(i)], rank, float(scores[int(i)]), "vector", query) for rank, i in enumerate(order, start=1)]
 
+    def _lir(self, query: str, docs: list[dict[str, Any]], top_k: int, candidate_k: int) -> list[SearchHit]:
+        if not docs:
+            return []
+        candidates = rrf_fuse(
+            [
+                self._keyword(query, docs, min(candidate_k, len(docs))),
+                self._vector(query, docs, min(candidate_k, len(docs))),
+            ],
+            top_k=min(candidate_k, len(docs)),
+        )
+        query_vectors = self.embedder.embed_query_patches(query)
+        scored: list[tuple[float, SearchHit, dict[str, Any]]] = []
+        for candidate in candidates:
+            doc_vectors = candidate.doc.get("patch_vectors") or []
+            score = late_interaction_score(query_vectors, doc_vectors)
+            if score <= 0:
+                score = candidate.score
+            scored.append((score, candidate))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        hits: list[SearchHit] = []
+        for rank, (score, candidate) in enumerate(scored[:top_k], start=1):
+            doc = candidate.doc
+            hits.append(
+                SearchHit(
+                    doc_id=candidate.doc_id,
+                    rank=rank,
+                    score=score,
+                    method="lir",
+                    doc=doc,
+                    excerpt=best_patch_excerpt(query, doc),
+                    components={**candidate.components, "late_interaction": score},
+                )
+            )
+        return hits
+
     def _result(self, doc: dict[str, Any], rank: int, score: float, method: str, query: str) -> SearchHit:
         return SearchHit(
             doc_id=str(doc.get("doc_id")),
@@ -207,7 +250,7 @@ class OpenSearchRetriever:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.client: OpenSearch = make_client(settings)
-        self.embedder = FeatureHashEmbedder(settings.vector_dim)
+        self.embedder = make_embedder(settings.embedding_backend, settings.vector_dim, settings.qwen_model)
 
     def search(
         self,
@@ -224,6 +267,8 @@ class OpenSearchRetriever:
             hits = self._keyword(query, top_k, filters)
         elif mode == "vector":
             hits = self._vector(query, top_k, filters)
+        elif mode == "lir":
+            hits = self._lir(query, top_k, candidate_k, filters)
         else:
             hits = rrf_fuse([self._keyword(query, candidate_k, filters), self._vector(query, candidate_k, filters)], top_k)
         return SearchResponse(
@@ -261,7 +306,7 @@ class OpenSearchRetriever:
                 }
             },
             "highlight": {"fields": {"title": {}, "summary": {}, "body": {}, "search_text": {}}},
-            "_source": {"excludes": ["vector"]},
+            "_source": {"excludes": ["vector", "patch_vectors"]},
         }
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "keyword", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
@@ -271,9 +316,94 @@ class OpenSearchRetriever:
         knn: dict[str, Any] = {"vector": vector, "k": top_k}
         if filters:
             knn["filter"] = {"bool": {"filter": filters}}
-        body = {"size": top_k, "query": {"knn": {"vector": knn}}, "_source": {"excludes": ["vector"]}}
+        body = {"size": top_k, "query": {"knn": {"vector": knn}}, "_source": {"excludes": ["vector", "patch_vectors"]}}
         response = self.client.search(index=self.settings.opensearch_index, body=body)
         return [self._hit_to_result(hit, rank, "vector", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
+
+    def _lir(self, query: str, top_k: int, candidate_k: int, filters: list[dict[str, Any]]) -> list[SearchHit]:
+        query_vectors = self.embedder.embed_query_patches(query)
+        query_vector = mean_pool(query_vectors, self.embedder.dimension)
+        try:
+            return self._native_lir(query, query_vector, query_vectors, top_k, candidate_k, filters)
+        except Exception:
+            return self._client_lir(query, query_vectors, top_k, candidate_k, filters)
+
+    def _native_lir(
+        self,
+        query: str,
+        query_vector: list[float],
+        query_vectors: list[list[float]],
+        top_k: int,
+        candidate_k: int,
+        filters: list[dict[str, Any]],
+    ) -> list[SearchHit]:
+        knn: dict[str, Any] = {"vector": query_vector, "k": candidate_k}
+        if filters:
+            knn["filter"] = {"bool": {"filter": filters}}
+        body = {
+            "size": top_k,
+            "query": {"knn": {"vector": knn}},
+            "rescore": {
+                "window_size": candidate_k,
+                "query": {
+                    "query_weight": 0.0,
+                    "rescore_query_weight": 1.0,
+                    "rescore_query": {
+                        "script_score": {
+                            "query": {"match_all": {}},
+                            "script": {
+                                "source": "lateInteractionScore(params.query_vector, 'patch_vectors', params._source)",
+                                "params": {"query_vector": query_vectors},
+                            },
+                        }
+                    },
+                },
+            },
+            "_source": {"excludes": ["vector", "patch_vectors"]},
+        }
+        response = self.client.search(index=self.settings.opensearch_index, body=body, request_timeout=120)
+        return [self._hit_to_result(hit, rank, "lir", query) for rank, hit in enumerate(response["hits"]["hits"], start=1)]
+
+    def _client_lir(
+        self,
+        query: str,
+        query_vectors: list[list[float]],
+        top_k: int,
+        candidate_k: int,
+        filters: list[dict[str, Any]],
+    ) -> list[SearchHit]:
+        candidates = rrf_fuse([self._keyword(query, candidate_k, filters), self._vector(query, candidate_k, filters)], candidate_k)
+        ids = [hit.doc_id for hit in candidates]
+        if not ids:
+            return []
+        response = self.client.mget(index=self.settings.opensearch_index, body={"ids": ids}, _source=True)
+        docs_by_id = {
+            str(row.get("_source", {}).get("doc_id") or row.get("_id")): row.get("_source", {})
+            for row in response.get("docs", [])
+            if row.get("found")
+        }
+        scored: list[tuple[float, SearchHit]] = []
+        for candidate in candidates:
+            doc = docs_by_id.get(candidate.doc_id, candidate.doc)
+            score = late_interaction_score(query_vectors, doc.get("patch_vectors") or [])
+            if score <= 0:
+                score = candidate.score
+            scored.append((score, candidate, doc))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        hits: list[SearchHit] = []
+        for rank, (score, candidate, doc) in enumerate(scored[:top_k], start=1):
+            hits.append(
+                SearchHit(
+                    doc_id=candidate.doc_id,
+                    rank=rank,
+                    score=score,
+                    method="lir",
+                    doc=doc,
+                    excerpt=best_patch_excerpt(query, doc),
+                    components={**candidate.components, "late_interaction": score},
+                )
+            )
+        return hits
 
     def _hit_to_result(self, hit: dict[str, Any], rank: int, method: str, query: str) -> SearchHit:
         source = hit.get("_source", {})
@@ -293,3 +423,20 @@ def make_retriever(settings: Settings, prefer_opensearch: bool = True) -> LocalR
     if prefer_opensearch and status.available and status.doc_count > 0:
         return OpenSearchRetriever(settings)
     return LocalRetriever(settings)
+
+
+def best_patch_excerpt(query: str, doc: dict[str, Any]) -> str:
+    patches = doc.get("patches") or []
+    if not patches:
+        return excerpt_for(query, doc.get("search_text") or doc.get("body") or doc.get("summary") or "")
+    query_terms = {term.lower() for term in query.split() if len(term) > 2}
+    best = max(
+        patches,
+        key=lambda patch: sum(1 for term in query_terms if term in str(patch.get("text") or "").lower()),
+    )
+    label = best.get("kind") or "patch"
+    if best.get("start_s") is not None and best.get("end_s") is not None:
+        label = f"{label} {int(float(best['start_s']))}-{int(float(best['end_s']))}s"
+    elif best.get("page") is not None:
+        label = f"{label} p{best['page']}"
+    return f"{label}: {excerpt_for(query, best.get('text') or '')}"

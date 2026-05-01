@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
-Modality = Literal["image", "pdf", "document", "video", "table", "mixed"]
+Modality = Literal["image", "pdf", "document", "video", "audio", "table", "mixed"]
 
 
 class Asset(BaseModel):
@@ -16,6 +16,19 @@ class Asset(BaseModel):
     width: int | None = None
     height: int | None = None
     duration_s: float | None = None
+
+
+class Patch(BaseModel):
+    patch_id: str
+    kind: str
+    ordinal: int
+    text: str
+    page: int | None = None
+    start_s: float | None = None
+    end_s: float | None = None
+    source_file: str = ""
+    asset_url: str = ""
+    skipped: bool = False
 
 
 class OpenRecord(BaseModel):
@@ -62,4 +75,9 @@ class OpenRecord(BaseModel):
 class IndexedRecord(OpenRecord):
     search_text: str
     vector: list[float]
+    patches: list[Patch] = Field(default_factory=list)
+    patch_vectors: list[list[float]] = Field(default_factory=list)
+    patch_count: int = 0
+    embedding_backend: str = "feature-hash"
+    embedding_model: str = "feature-hash"
     indexed_at: str

@@ -145,49 +145,109 @@ class OpenSourceClient:
         return records
 
     def internet_archive_videos(self, query: str = DEFAULT_QUERY, limit: int = 8) -> list[OpenRecord]:
-        params = {
-            "q": f"mediatype:movies AND ({query})",
-            "fl[]": ["identifier", "title", "description", "creator", "licenseurl", "date", "collection"],
-            "rows": str(limit),
-            "page": "1",
-            "output": "json",
-        }
-        payload = self.client.get("https://archive.org/advancedsearch.php", params=params).json()
-        docs = payload.get("response", {}).get("docs", [])
+        return self.internet_archive_media("movies", "video", query=query, limit=limit)
+
+    def internet_archive_media(
+        self,
+        mediatype: str,
+        modality: str,
+        query: str = "",
+        limit: int = 8,
+        page_size: int = 1000,
+        sort: str = "downloads desc",
+    ) -> list[OpenRecord]:
+        fields = [
+            "identifier",
+            "title",
+            "description",
+            "creator",
+            "licenseurl",
+            "date",
+            "collection",
+            "subject",
+            "downloads",
+            "mediatype",
+            "language",
+        ]
+        page = 1
         records: list[OpenRecord] = []
-        for row in docs:
-            identifier = clean_text(row.get("identifier"))
-            title = clean_text(row.get("title") or identifier)
-            description = clean_text(row.get("description"), max_chars=1800)
-            creator = _join_values(row.get("creator"))
-            collections = _as_list(row.get("collection"))
-            records.append(
-                OpenRecord(
-                    doc_id="archive-" + stable_id(identifier),
-                    source="Internet Archive",
-                    source_id=identifier,
-                    source_url=f"https://archive.org/details/{identifier}",
-                    modality="video",
-                    title=title,
-                    summary=description,
-                    body=description,
-                    license=clean_text(row.get("licenseurl")),
-                    license_url=clean_text(row.get("licenseurl")),
-                    attribution=creator,
-                    published_at=clean_text(row.get("date")) or None,
-                    tags=["video", "internet archive", *collections[:8]],
-                    facets={"collection": collections},
-                    assets=[
-                        Asset(
-                            kind="thumbnail",
-                            url=f"https://archive.org/services/img/{identifier}",
-                            thumbnail_url=f"https://archive.org/services/img/{identifier}",
-                            mime_type="image/jpeg",
-                        )
-                    ],
-                )
-            )
+        query = clean_text(query)
+        q = f"mediatype:{mediatype}"
+        if query and query != "*":
+            q = f"{q} AND ({query})"
+        while len(records) < limit:
+            params = {
+                "q": q,
+                "fl[]": fields,
+                "rows": str(min(page_size, limit - len(records))),
+                "page": str(page),
+                "output": "json",
+                "sort[]": sort,
+            }
+            payload = self.client.get("https://archive.org/advancedsearch.php", params=params).json()
+            docs = payload.get("response", {}).get("docs", [])
+            if not docs:
+                break
+            for row in docs:
+                identifier = clean_text(row.get("identifier"))
+                if not identifier:
+                    continue
+                records.append(self._internet_archive_record(row, identifier, modality))
+                if len(records) >= limit:
+                    break
+            page += 1
         return records
+
+    def _internet_archive_record(self, row: dict[str, Any], identifier: str, modality: str) -> OpenRecord:
+        title = clean_text(_join_values(row.get("title")) or identifier)
+        description = clean_text(_join_values(row.get("description")), max_chars=2400)
+        creator = _join_values(row.get("creator"))
+        collections = _as_list(row.get("collection"))
+        subjects = _as_list(row.get("subject"))
+        license_url = clean_text(_join_values(row.get("licenseurl")))
+        mediatype = clean_text(row.get("mediatype"))
+        thumbnail_url = f"https://archive.org/services/img/{identifier}"
+        asset_kind = "thumbnail"
+        mime_type = "image/jpeg"
+        if modality == "audio":
+            asset_kind = "audio-item"
+            mime_type = "audio/*"
+        elif modality == "video":
+            asset_kind = "video-item"
+            mime_type = "video/*"
+        elif modality == "pdf":
+            asset_kind = "text-item"
+            mime_type = "application/pdf"
+        return OpenRecord(
+            doc_id="archive-" + stable_id(identifier),
+            source="Internet Archive",
+            source_id=identifier,
+            source_url=f"https://archive.org/details/{identifier}",
+            modality=modality,  # type: ignore[arg-type]
+            title=title,
+            summary=description,
+            body=description,
+            license=license_url or "Internet Archive metadata",
+            license_url=license_url,
+            attribution=creator,
+            language=_join_values(row.get("language")) or "unknown",
+            published_at=clean_text(row.get("date")) or None,
+            tags=[modality, "internet archive", mediatype, *collections[:8], *subjects[:8]],
+            facets={
+                "collection": collections,
+                "subjects": subjects[:16],
+                "downloads": row.get("downloads"),
+                "mediatype": mediatype,
+            },
+            assets=[
+                Asset(
+                    kind=asset_kind,
+                    url=f"https://archive.org/details/{identifier}",
+                    thumbnail_url=thumbnail_url,
+                    mime_type=mime_type,
+                )
+            ],
+        )
 
     def nasa_exoplanet_rows(self, limit: int = 12) -> list[OpenRecord]:
         query = (

@@ -5,11 +5,12 @@ from dataclasses import replace
 from openlens.config import Settings
 from openlens.api import InlineIngestRequest, inline_request_to_record
 from openlens.data import write_jsonl
-from openlens.embeddings import FeatureHashEmbedder
+from openlens.embeddings import FeatureHashEmbedder, late_interaction_score
 from openlens.indexer import prepare_record
 from openlens.models import OpenRecord
 from openlens.retrieval import LocalRetriever, SearchHit, rrf_fuse
 from openlens.text import compose_search_text
+from openlens.video import expected_chunk_spans, is_still_frame_chunk
 
 
 def make_record(doc_id: str, title: str, body: str, modality: str = "document") -> OpenRecord:
@@ -90,6 +91,35 @@ def test_local_retriever_filters_modalities(tmp_path) -> None:
     assert {hit.doc["modality"] for hit in response.hits} == {"image"}
 
 
+def test_patch_vectors_drive_late_interaction(tmp_path) -> None:
+    settings = replace(
+        Settings(),
+        docs_path=tmp_path / "docs.jsonl",
+        embedded_docs_path=tmp_path / "embedded.jsonl",
+        vector_dim=64,
+    )
+    embedder = FeatureHashEmbedder(settings.vector_dim)
+    positive = prepare_record(
+        make_record("pdf-1", "Polar report", "Page one: glacier albedo decline. Page two: sea ice retreat.", "pdf"),
+        embedder,
+    )
+    negative = prepare_record(
+        make_record("video-1", "Archive concert clip", "Thirty seconds of jazz musicians on stage.", "video"),
+        embedder,
+    )
+    query_vectors = embedder.embed_query_patches("glacier albedo")
+    assert late_interaction_score(query_vectors, positive.patch_vectors) > late_interaction_score(
+        query_vectors, negative.patch_vectors
+    )
+    write_jsonl(
+        settings.embedded_docs_path,
+        [positive.model_dump(mode="json"), negative.model_dump(mode="json")],
+    )
+    response = LocalRetriever(settings).search("glacier albedo", mode="lir")
+    assert response.hits[0].doc_id == "pdf-1"
+    assert response.hits[0].method == "lir"
+
+
 def test_inline_ingest_request_becomes_stable_record() -> None:
     req = InlineIngestRequest(
         title="Fresh field note",
@@ -103,3 +133,10 @@ def test_inline_ingest_request_becomes_stable_record() -> None:
     assert first.doc_id == second.doc_id
     assert first.source == "Notebook"
     assert "live" in first.tags
+
+
+def test_sentry_style_video_chunk_helpers() -> None:
+    spans = expected_chunk_spans(65, chunk_duration_s=30, overlap_s=5)
+    assert [(span.start_s, span.end_s) for span in spans] == [(0.0, 30.0), (25.0, 55.0), (50.0, 65.0)]
+    assert is_still_frame_chunk([1000, 1010, 990, 1005])
+    assert not is_still_frame_chunk([1000, 1400, 850, 1600])

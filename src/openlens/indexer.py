@@ -8,7 +8,8 @@ from opensearchpy import OpenSearch, helpers
 
 from .config import Settings
 from .data import utc_now, write_jsonl
-from .embeddings import FeatureHashEmbedder
+from .embeddings import FeatureHashEmbedder, mean_pool
+from .qwen_embedder import make_embedder
 from .models import IndexedRecord, OpenRecord
 from .text import compose_search_text
 
@@ -83,10 +84,15 @@ def index_mapping(dimension: int) -> dict[str, Any]:
                 "published_at": {"type": "date", "ignore_malformed": True},
                 "updated_at": {"type": "date", "ignore_malformed": True},
                 "indexed_at": {"type": "date"},
+                "patch_count": {"type": "integer"},
+                "embedding_backend": {"type": "keyword"},
+                "embedding_model": {"type": "keyword"},
                 "tags": {"type": "keyword"},
                 "facets": {"type": "object", "enabled": False},
                 "table": {"type": "object", "enabled": False},
                 "assets": {"type": "object", "enabled": False},
+                "patches": {"type": "object", "enabled": False},
+                "patch_vectors": {"type": "object", "enabled": False},
                 "vector": {
                     "type": "knn_vector",
                     "dimension": dimension,
@@ -103,10 +109,18 @@ def index_mapping(dimension: int) -> dict[str, Any]:
 
 
 def prepare_record(record: OpenRecord, embedder: FeatureHashEmbedder) -> IndexedRecord:
+    patches = embedder.patch_record(record)
+    patch_vectors = embedder.embed_patches(patches)
+    vector = mean_pool(patch_vectors or [embedder.embed_record(record)], embedder.dimension)
     return IndexedRecord(
         **record.model_dump(),
         search_text=compose_search_text(record),
-        vector=embedder.embed_record(record),
+        vector=vector,
+        patches=patches,
+        patch_vectors=patch_vectors,
+        patch_count=len(patches),
+        embedding_backend=getattr(embedder, "backend", "feature-hash"),
+        embedding_model=getattr(embedder, "model_name", "feature-hash"),
         indexed_at=utc_now(),
     )
 
@@ -144,7 +158,7 @@ def embed_and_optionally_index(
     recreate: bool = True,
     skip_opensearch: bool = False,
 ) -> tuple[list[IndexedRecord], OpenSearchStatus]:
-    embedder = FeatureHashEmbedder(settings.vector_dim)
+    embedder = make_embedder(settings.embedding_backend, settings.vector_dim, settings.qwen_model)
     indexed = prepare_records(records, embedder)
     write_jsonl(settings.embedded_docs_path, [record.model_dump(mode="json") for record in indexed])
     if skip_opensearch:

@@ -26,6 +26,8 @@ class Settings:
     opensearch_index: str = os.getenv("OPENSEARCH_INDEX", "openlens_multimodal")
     opensearch_timeout_s: float = float(os.getenv("OPENSEARCH_TIMEOUT_S", "30"))
     vector_dim: int = int(os.getenv("OPENLENS_VECTOR_DIM", "384"))
+    embedding_backend: str = os.getenv("OPENLENS_EMBEDDING_BACKEND", "feature-hash")
+    qwen_model: str = os.getenv("OPENLENS_QWEN_MODEL", "qwen2b")
     docs_path: Path = _path_from_env("OPENLENS_DOCS", "data/processed/open_corpus.jsonl")
     embedded_docs_path: Path = _path_from_env("OPENLENS_EMBEDDED_DOCS", "data/processed/open_corpus_embedded.jsonl")
     user_agent: str = os.getenv("OPENLENS_USER_AGENT", "openlens-opensearch-demo/0.1")

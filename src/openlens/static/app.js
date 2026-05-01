@@ -142,11 +142,12 @@ function renderResults() {
     card.className = `result-card ${state.activeId === hit.doc_id ? "is-active" : ""}`;
     card.dataset.modality = hit.modality || "document";
     const thumb = firstThumb(hit);
+    const patchLabel = hit.patch_count ? `${hit.patch_count} patches` : "single vector";
     card.innerHTML = `
       <div class="modality-rail"></div>
       <div class="result-body">
         <h2 class="result-title">${esc(hit.title)}</h2>
-        <div class="result-meta">${esc(hit.modality)} &middot; ${esc(hit.source)}</div>
+        <div class="result-meta">${esc(hit.modality)} &middot; ${esc(hit.source)} &middot; ${esc(patchLabel)}</div>
         <div class="score-line">${esc(hit.method)} ${score(hit.score)}</div>
         <p class="result-summary">${esc(hit.excerpt || hit.summary)}</p>
       </div>
@@ -177,10 +178,27 @@ function renderDetail(hit) {
     .map(([key, value]) => `<div class="kv-row"><div class="kv-key">${esc(key)}</div><div class="kv-value">${esc(value)}</div></div>`)
     .join("");
   const tags = (hit.tags || []).slice(0, 10).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("");
+  const patches = (hit.patches || [])
+    .slice(0, 10)
+    .map((patch) => {
+      const loc =
+        patch.start_s !== null && patch.start_s !== undefined
+          ? `${Math.round(Number(patch.start_s))}-${Math.round(Number(patch.end_s || 0))}s`
+          : patch.page
+            ? `p${patch.page}`
+            : `#${Number(patch.ordinal || 0) + 1}`;
+      return `<div class="patch-row"><span>${esc(loc)}</span><strong>${esc(patch.kind)}</strong><p>${esc(patch.text)}</p></div>`;
+    })
+    .join("");
   pane.innerHTML = `
     ${thumb ? `<img class="detail-media" src="${esc(thumb)}" alt="" referrerpolicy="no-referrer" />` : ""}
     <h2>${esc(hit.title)}</h2>
     <div class="detail-meta">${esc(hit.modality)} &middot; ${esc(hit.source)} &middot; ${esc(hit.license)}</div>
+    <div class="embedding-strip">
+      <span>${esc(hit.patch_count || 0)} patches</span>
+      <span>${esc(hit.embedding_backend || "feature-hash")}</span>
+      <span>${esc(hit.embedding_model || "feature-hash")}</span>
+    </div>
     <p class="detail-summary">${esc(hit.summary || hit.excerpt || "")}</p>
     <div class="tag-row">${tags}</div>
     ${
@@ -188,6 +206,7 @@ function renderDetail(hit) {
         ? `<a href="${esc(hit.source_url)}" target="_blank" rel="noreferrer">Open source record</a>`
         : ""
     }
+    ${patches ? `<div class="patch-list">${patches}</div>` : ""}
     ${rows ? `<div class="kv-list">${rows}</div>` : ""}
   `;
 }
@@ -196,6 +215,7 @@ async function ingest(event) {
   event.preventDefault();
   const title = $("ingestTitle").value.trim();
   const body = $("ingestBody").value.trim();
+  const assetUrl = $("ingestAssetUrl").value.trim();
   if (!title || !body) {
     showToast("Title and text required");
     return;
@@ -209,11 +229,13 @@ async function ingest(event) {
         body,
         modality: $("ingestModality").value,
         source: "Live ingest",
+        asset_url: assetUrl,
         tags: ["inline"],
       }),
     });
     $("queryInput").value = title;
     $("ingestTitle").value = "";
+    $("ingestAssetUrl").value = "";
     $("ingestBody").value = "";
     showToast(`Indexed to ${payload.indexed_to}`);
     await loadStatus();

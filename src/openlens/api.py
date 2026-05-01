@@ -11,9 +11,9 @@ from pydantic import BaseModel, Field
 
 from .config import get_settings
 from .data import append_or_replace_jsonl, stable_id
-from .embeddings import FeatureHashEmbedder
 from .indexer import bulk_index, check_status, make_client, prepare_record, recreate_index
-from .models import Modality, OpenRecord
+from .models import Asset, Modality, OpenRecord
+from .qwen_embedder import make_embedder
 from .retrieval import LocalRetriever, OpenSearchRetriever, SearchMode, make_retriever
 from .text import clean_text
 
@@ -34,6 +34,9 @@ class InlineIngestRequest(BaseModel):
     attribution: str = ""
     tags: list[str] = Field(default_factory=list)
     facets: dict[str, Any] = Field(default_factory=dict)
+    asset_url: str = ""
+    thumbnail_url: str = ""
+    duration_s: float | None = None
 
 
 def inline_request_to_record(req: InlineIngestRequest) -> OpenRecord:
@@ -42,6 +45,17 @@ def inline_request_to_record(req: InlineIngestRequest) -> OpenRecord:
     source = clean_text(req.source) or "Live ingest"
     source_url = clean_text(req.source_url)
     doc_id = "live-" + stable_id(source, source_url, title, body)
+    asset_url = clean_text(req.asset_url)
+    assets = []
+    if asset_url:
+        assets.append(
+            Asset(
+                kind=req.modality,
+                url=asset_url,
+                thumbnail_url=clean_text(req.thumbnail_url) or asset_url,
+                duration_s=req.duration_s,
+            )
+        )
     return OpenRecord(
         doc_id=doc_id,
         source=source,
@@ -56,6 +70,7 @@ def inline_request_to_record(req: InlineIngestRequest) -> OpenRecord:
         attribution=clean_text(req.attribution),
         tags=[req.modality, "live", *req.tags],
         facets=req.facets,
+        assets=assets,
     )
 
 
@@ -97,6 +112,8 @@ def status() -> dict[str, Any]:
         "embedded_docs_path": str(settings.embedded_docs_path),
         "local_docs_available": settings.docs_path.exists() or settings.embedded_docs_path.exists(),
         "vector_dim": settings.vector_dim,
+        "embedding_backend": settings.embedding_backend,
+        "qwen_model": settings.qwen_model,
     }
 
 
@@ -105,13 +122,14 @@ def examples() -> dict[str, Any]:
     return {
         "queries": [
             "satellite imagery climate change",
-            "PDF papers about machine learning for earth observation",
+            "PDF pages with charts about machine learning for earth observation",
             "public domain videos of scientific archives",
+            "archival audio recordings about civil rights speeches",
             "transit method exoplanet rows",
             "glacier retreat images",
         ],
-        "modes": ["hybrid", "keyword", "vector"],
-        "modalities": ["image", "pdf", "document", "video", "table"],
+        "modes": ["hybrid", "keyword", "vector", "lir"],
+        "modalities": ["image", "pdf", "document", "video", "audio", "table"],
     }
 
 
@@ -140,7 +158,7 @@ def search(
 def ingest(req: InlineIngestRequest, prefer_opensearch: bool = True) -> dict[str, Any]:
     settings = get_settings()
     record = inline_request_to_record(req)
-    embedder = FeatureHashEmbedder(settings.vector_dim)
+    embedder = make_embedder(settings.embedding_backend, settings.vector_dim, settings.qwen_model)
     indexed = prepare_record(record, embedder)
 
     append_or_replace_jsonl(settings.docs_path, [record.model_dump(mode="json")])

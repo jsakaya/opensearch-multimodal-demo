@@ -24,6 +24,7 @@
           <button class="mode-tab is-active" data-mode="hybrid" type="button">Hybrid</button>
           <button class="mode-tab" data-mode="keyword" type="button">BM25</button>
           <button class="mode-tab" data-mode="vector" type="button">Vector</button>
+          <button class="mode-tab" data-mode="lir" type="button">LIR</button>
         </nav>
       </header>
 
@@ -41,6 +42,7 @@
             <div class="pane-title">Live ingest</div>
             <form id="ingestForm" class="ingest-form">
               <input id="ingestTitle" name="title" autocomplete="off" placeholder="Title" />
+              <input id="ingestAssetUrl" name="assetUrl" autocomplete="off" placeholder="Asset URL" />
               <textarea id="ingestBody" name="body" rows="5" placeholder="Evidence text"></textarea>
               <div class="compact-row">
                 <select id="ingestModality" name="modality">
@@ -48,6 +50,7 @@
                   <option value="image">Image</option>
                   <option value="pdf">PDF</option>
                   <option value="video">Video</option>
+                  <option value="audio">Audio</option>
                   <option value="table">Table</option>
                 </select>
                 <button type="submit">Add</button>
