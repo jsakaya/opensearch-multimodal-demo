@@ -33,6 +33,7 @@ qwen = [
 [project.scripts]
 openlens-api = "openlens.api:main"
 openlens-build = "openlens.scripts.build_open_corpus:main"
+openlens-benchmark = "openlens.scripts.benchmark_retrieval:main"
 openlens-index = "openlens.scripts.index_open_corpus:main"
 openlens-qwen-benchmark = "openlens.scripts.benchmark_qwen:main"
 openlens-smoke = "openlens.scripts.smoke_demo:main"

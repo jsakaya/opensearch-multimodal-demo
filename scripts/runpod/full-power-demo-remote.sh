@@ -112,8 +112,13 @@ build_corpus
 echo "embedding and indexing full 4096d Qwen vectors into OpenSearch..."
 openlens-index --input "$OPENLENS_DOCS"
 start_api
+openlens-benchmark \
+  --samples-per-modality "${OPENLENS_BENCHMARK_SAMPLES_PER_MODALITY:-5}" \
+  --repeats "${OPENLENS_BENCHMARK_REPEATS:-2}" \
+  --output "$OPENLENS_DATA_DIR/retrieval-benchmark.json"
 
 echo
 echo "OpenLens full-power H100 demo is ready inside the pod."
 echo "API: http://127.0.0.1:8787"
 echo "OpenSearch: $OPENSEARCH_URL"
+echo "Benchmark: $OPENLENS_DATA_DIR/retrieval-benchmark.md"

@@ -7,7 +7,7 @@ from openlens.api import InlineIngestRequest, inline_request_to_record
 from openlens.data import write_jsonl
 from openlens.embeddings import FeatureHashEmbedder, late_interaction_score
 from openlens.indexer import prepare_record
-from openlens.models import OpenRecord
+from openlens.models import Asset, OpenRecord
 from openlens.qwen_embedder import qwen_runtime_status
 from openlens.retrieval import LocalRetriever, SearchHit, rrf_fuse
 from openlens.text import compose_search_text
@@ -154,3 +154,16 @@ def test_qwen_defaults_to_full_embedding_dimension(monkeypatch) -> None:
     monkeypatch.setenv("OPENLENS_EMBEDDING_BACKEND", "qwen")
     monkeypatch.delenv("OPENLENS_VECTOR_DIM", raising=False)
     assert Settings().vector_dim == 4096
+
+
+def test_audio_records_get_transcript_style_evidence_patches() -> None:
+    record = make_record("aud-1", "Apollo mission control audio", "A catalog description of launch audio.", "audio")
+    record.facets["subjects"] = ["mission control", "rocket launch"]
+    record.assets = [
+        Asset(kind="audio-item", url="https://example.test/audio", mime_type="audio/mpeg", duration_s=90.0)
+    ]
+    patches = FeatureHashEmbedder(64).patch_record(record)
+    kinds = {patch.kind for patch in patches}
+    assert "audio_caption" in kinds
+    assert "audio_transcript_or_description" in kinds
+    assert any("mission control" in patch.text for patch in patches)

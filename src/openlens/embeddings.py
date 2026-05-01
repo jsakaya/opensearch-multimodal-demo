@@ -139,15 +139,26 @@ class FeatureHashEmbedder:
                     asset_url=record.assets[0].url if record.assets else "",
                 )
         elif record.modality == "audio":
-            chunks = chunk_text(record.body or record.summary or record.title, patch_chars) or [record.title]
+            audio_context = audio_evidence_text(record)
+            add("audio_caption", audio_context)
+            chunks = chunk_text(record.body or record.summary or audio_context or record.title, patch_chars) or [record.title]
+            duration_s = next((asset.duration_s for asset in record.assets if asset.duration_s), None)
+            spans = expected_chunk_spans(duration_s or len(chunks) * 30, chunk_duration_s=30, overlap_s=5)
             for idx, chunk in enumerate(chunks):
+                span = spans[min(idx, len(spans) - 1)]
                 add(
-                    "audio_semantic_chunk",
-                    chunk,
+                    "audio_transcript_or_description",
+                    f"Audio transcript, caption, or catalog description: {chunk}",
                     page=idx + 1,
-                    start_s=float(idx * 30),
-                    end_s=float((idx + 1) * 30),
+                    start_s=span.start_s,
+                    end_s=span.end_s,
                     asset_url=record.assets[0].url if record.assets else "",
+                )
+            for asset in record.assets[:2]:
+                add(
+                    "audio_asset_metadata",
+                    f"Audio asset {asset.kind} {asset.mime_type} duration {asset.duration_s} {asset.url}",
+                    asset_url=asset.url,
                 )
         elif record.modality == "table":
             for idx, (key, value) in enumerate(record.table.items()):
@@ -187,6 +198,38 @@ def chunk_text(text: str, patch_chars: int = 560) -> list[str]:
             chunks.append(chunk)
         start = max(end, start + 1)
     return chunks
+
+
+def audio_evidence_text(record: OpenRecord) -> str:
+    """Build text evidence for audio because Qwen-VL embeddings are not raw-audio-native."""
+    subjects = record.facets.get("subjects") or record.facets.get("keywords") or []
+    if isinstance(subjects, str):
+        subject_text = subjects
+    else:
+        subject_text = " ".join(str(item) for item in subjects[:12])
+    collections = record.facets.get("collection") or []
+    if isinstance(collections, str):
+        collection_text = collections
+    else:
+        collection_text = " ".join(str(item) for item in collections[:8])
+    asset_text = " ".join(
+        f"{asset.kind} {asset.mime_type} duration {asset.duration_s or ''} {asset.url}" for asset in record.assets[:3]
+    )
+    return " ".join(
+        str(part or "").strip()
+        for part in [
+            "audio recording",
+            record.title,
+            record.summary,
+            record.body,
+            " ".join(record.tags),
+            subject_text,
+            collection_text,
+            record.attribution,
+            asset_text,
+        ]
+        if str(part or "").strip()
+    )
 
 
 def mean_pool(vectors: list[list[float]], dimension: int) -> list[float]:

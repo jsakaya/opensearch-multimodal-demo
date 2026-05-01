@@ -91,6 +91,16 @@ uv run openlens-smoke --query "satellite imagery climate change"
 uv run openlens-smoke --query "archival audio speeches" --mode lir
 ```
 
+Run a repeatable OpenSearch benchmark:
+
+```bash
+uv run openlens-benchmark --output docs/benchmarks/local-openlens.json
+```
+
+See `docs/retrieval-quality-and-display.md` for the H100 reranking, audio
+enrichment, and LLM evidence-display plan. The latest committed local hard-number
+run is in `docs/benchmarks/local-2026-05-01-feature-hash.md`.
+
 Serve the app:
 
 ```bash
@@ -168,8 +178,8 @@ scripts/runpod/full-power-demo.sh
 3.3 service if `OPENSEARCH_URL` is not already reachable, autotunes the Qwen
 batch size up to `OPENLENS_QWEN_MAX_BATCH=64`, builds the 10k NASA/space corpus,
 indexes full 4096-dimensional Qwen vectors and patch vectors into OpenSearch,
-starts the API, calls `POST /api/prewarm`, and opens a local SSH tunnel. The
-browser URL prints as `http://127.0.0.1:8787`.
+starts the API, calls `POST /api/prewarm`, writes retrieval benchmark artifacts,
+and opens a local SSH tunnel. The browser URL prints as `http://127.0.0.1:8787`.
 
 Inside an already-running pod you can run the same remote sequence directly:
 
