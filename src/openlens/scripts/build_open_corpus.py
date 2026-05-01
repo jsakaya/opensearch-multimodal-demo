@@ -87,7 +87,7 @@ def _build_bulk_internet_archive(
         mediatype, modality = BULK_IA_SOURCES[name]
         limit = quota + (1 if index < remainder else 0)
         try:
-            batch = client.internet_archive_media(
+            batch = client.internet_archive_media_sharded(
                 mediatype,
                 modality,
                 query=args.ia_query,
@@ -102,13 +102,12 @@ def _build_bulk_internet_archive(
     if shortfall:
         console.print(f"[yellow]bulk shortfall: fetching {shortfall:,} additional text records[/yellow]")
         records.extend(
-            client.internet_archive_media(
+            client.internet_archive_media_sharded(
                 "texts",
                 "pdf",
                 query=args.ia_query,
                 limit=shortfall,
                 page_size=args.ia_page_size,
-                sort="date desc",
             )
         )
     return dedupe_records(records)[:target_docs]

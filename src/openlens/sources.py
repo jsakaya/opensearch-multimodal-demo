@@ -15,6 +15,19 @@ from .text import clean_text, table_text
 
 ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
 DEFAULT_QUERY = "earth observation climate machine learning"
+IA_DATE_SHARDS = [
+    "[0001-01-01 TO 1899-12-31]",
+    "[1900-01-01 TO 1949-12-31]",
+    "[1950-01-01 TO 1979-12-31]",
+    "[1980-01-01 TO 1989-12-31]",
+    "[1990-01-01 TO 1999-12-31]",
+    "[2000-01-01 TO 2004-12-31]",
+    "[2005-01-01 TO 2009-12-31]",
+    "[2010-01-01 TO 2014-12-31]",
+    "[2015-01-01 TO 2019-12-31]",
+    "[2020-01-01 TO 2022-12-31]",
+    "[2023-01-01 TO 2026-12-31]",
+]
 
 
 class OpenSourceClient:
@@ -196,6 +209,92 @@ class OpenSourceClient:
                 if len(records) >= limit:
                     break
             page += 1
+        return records
+
+    def internet_archive_media_scrape(
+        self,
+        mediatype: str,
+        modality: str,
+        query: str = "",
+        limit: int = 8,
+        page_size: int = 1000,
+        sort: str = "",
+    ) -> list[OpenRecord]:
+        fields = [
+            "identifier",
+            "title",
+            "description",
+            "creator",
+            "licenseurl",
+            "date",
+            "collection",
+            "subject",
+            "downloads",
+            "mediatype",
+            "language",
+        ]
+        query = clean_text(query)
+        q = f"mediatype:{mediatype}"
+        if query and query != "*":
+            q = f"{q} AND ({query})"
+        cursor = ""
+        records: list[OpenRecord] = []
+        while len(records) < limit:
+            params = {
+                "q": q,
+                "fields": ",".join(fields),
+                "count": str(max(100, min(page_size, limit - len(records)))),
+            }
+            if sort:
+                params["sorts"] = sort
+            if cursor:
+                params["cursor"] = cursor
+            payload = self.client.get("https://archive.org/services/search/v1/scrape", params=params).json()
+            items = payload.get("items") or []
+            if not items:
+                break
+            for row in items[: max(0, limit - len(records))]:
+                identifier = clean_text(row.get("identifier"))
+                if identifier:
+                    records.append(self._internet_archive_record(row, identifier, modality))
+            next_cursor = clean_text(payload.get("cursor"))
+            if not next_cursor or next_cursor == cursor:
+                break
+            cursor = next_cursor
+        return records
+
+    def internet_archive_media_sharded(
+        self,
+        mediatype: str,
+        modality: str,
+        query: str = "",
+        limit: int = 8,
+        page_size: int = 1000,
+    ) -> list[OpenRecord]:
+        records: list[OpenRecord] = []
+        seen: set[str] = set()
+        query = clean_text(query)
+        for date_range in IA_DATE_SHARDS:
+            if len(records) >= limit:
+                break
+            shard_query = f"date:{date_range}"
+            if query and query != "*":
+                shard_query = f"({query}) AND {shard_query}"
+            remaining = limit - len(records)
+            batch = self.internet_archive_media(
+                mediatype,
+                modality,
+                query=shard_query,
+                limit=remaining,
+                page_size=page_size,
+                sort="date desc",
+            )
+            for record in batch:
+                if record.doc_id not in seen:
+                    records.append(record)
+                    seen.add(record.doc_id)
+                if len(records) >= limit:
+                    break
         return records
 
     def _internet_archive_record(self, row: dict[str, Any], identifier: str, modality: str) -> OpenRecord:

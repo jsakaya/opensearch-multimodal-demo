@@ -4,10 +4,10 @@ OpenLens is a local-first OpenSearch demo for searching open multimodal records:
 
 - Wikimedia Commons image files and machine-readable license metadata.
 - arXiv paper/PDF records, with optional first-page PDF text extraction.
-- Internet Archive video records and thumbnails.
+- Internet Archive text/PDF-like records, images, videos, audio records, and thumbnails.
 - NASA Exoplanet Archive TAP rows treated as SQL-style table documents.
 
-The demo indexes every item into one OpenSearch schema with BM25 fields, facets, a deterministic dense vector, and an HNSW `knn_vector`. Retrieval runs as keyword, vector, or application-side RRF hybrid search. The code is designed so a tiny local corpus and a million-document corpus use the same ingestion/index contract.
+The demo indexes every item into one OpenSearch schema with BM25 fields, facets, a pooled HNSW `knn_vector`, and per-document patch vectors for late-interaction reranking. Retrieval runs as keyword, vector, RRF hybrid, or LIR patch rerank search. The code is designed so a tiny local corpus and a million-document corpus use the same ingestion/index contract.
 
 ## Why This Shape
 
@@ -15,11 +15,12 @@ OpenSearch can combine classic inverted-index retrieval with vector search. This
 
 1. Normalize each modality into a shared `OpenRecord`.
 2. Compose searchable evidence from titles, captions, abstracts, transcripts/descriptions, table cells, tags, licenses, and asset metadata.
-3. Store a dense vector in `vector` for HNSW k-NN and keep rich raw fields for previews/facets.
-4. Use `refresh_interval=1s` and `refresh=wait_for`/`refresh=true` on small upserts for near real-time retrieval.
-5. Use streaming bulk indexing with deterministic IDs for scalable rebuilds and incremental replays.
+3. Split each record into modality-aware patches: PDF/text pages, image captions/assets, video/audio chunks with timestamps, table cells, and mixed evidence.
+4. Store a pooled dense vector in `vector` for HNSW k-NN and keep `patch_vectors` for late-interaction scoring.
+5. Use `refresh_interval=1s` and `refresh=wait_for`/`refresh=true` on small upserts for near real-time retrieval.
+6. Use streaming bulk indexing with deterministic IDs for scalable rebuilds and incremental replays.
 
-For a production-scale version, swap the local deterministic `FeatureHashEmbedder` for OpenSearch ML Commons, a CLIP/text-image model, a hosted embedding API, or neural sparse search while keeping the index and UI contract.
+The default embedder is deterministic and local so the 10k demo can run anywhere. For native multimodal retrieval, set `OPENLENS_EMBEDDING_BACKEND=qwen` and use the Qwen3-VL-Embedding provider; `OPENLENS_QWEN_MODEL` can also point at a Qwen3.5-compatible local/HF model path once its processor exposes the same interface.
 
 ## Data Sources
 
@@ -43,6 +44,12 @@ Build a small open corpus:
 uv run openlens-build --limit-per-source 8
 ```
 
+Build the 10,000-record multimodal corpus:
+
+```bash
+uv run openlens-build --bulk-internet-archive --target-docs 10000 --ia-page-size 1000
+```
+
 Optionally extract first pages from arXiv PDFs:
 
 ```bash
@@ -55,6 +62,12 @@ Embed and index:
 uv run openlens-index
 ```
 
+For a compact local machine index, use 128-dimensional feature-hash vectors:
+
+```bash
+OPENLENS_VECTOR_DIM=128 uv run openlens-index
+```
+
 If OpenSearch is not running, this still writes `data/processed/open_corpus_embedded.jsonl`:
 
 ```bash
@@ -65,6 +78,7 @@ Run a smoke query:
 
 ```bash
 uv run openlens-smoke --query "satellite imagery climate change"
+uv run openlens-smoke --query "archival audio speeches" --mode lir
 ```
 
 Serve the app:
@@ -80,6 +94,7 @@ Open http://localhost:8787.
 ```bash
 curl http://localhost:8787/api/status
 curl 'http://localhost:8787/api/search?q=satellite%20imagery%20climate%20change&mode=hybrid&top_k=5'
+curl 'http://localhost:8787/api/search?q=public%20domain%20video%20spacewalk&mode=lir&top_k=5'
 ```
 
 Near real-time ingest:
@@ -104,8 +119,33 @@ With OpenSearch available, the API writes the record to JSONL for replay, indexe
 - Keep deterministic `doc_id` values and replay source cursors into `helpers.streaming_bulk`.
 - Bulk load with `refresh=false`, then call one manual refresh at the end of a backfill.
 - For live writes, index individual docs or small batches with `refresh=wait_for`.
-- Split very large PDFs/transcripts into passage records that share `source_id`.
+- Split very large PDFs/transcripts into smaller patches or passage records that share `source_id`.
 - Add an ingest pipeline for production OCR, speech-to-text, PDF extraction, and neural sparse vectors.
+
+## Qwen / RunPod Encoder
+
+For GPU-native multimodal encoding:
+
+```bash
+uv sync --extra qwen
+OPENLENS_EMBEDDING_BACKEND=qwen OPENLENS_QWEN_MODEL=qwen2b OPENLENS_VECTOR_DIM=768 uv run openlens-index
+```
+
+The optional RunPod image lives in `docker/runpod-openlens-qwen-encoder/` and mirrors the QuickInsights Qwen3.5 fast-path setup:
+
+- CUDA 12.9 builder/runtime stages.
+- Prebuilt `/opt/venv` copied into the runtime image.
+- `PUBLIC_KEY` SSH bootstrap on port 22.
+- Build-time `verify_openlens_qwen.py`.
+- GHCR workflow: `.github/workflows/build-runpod-openlens-qwen-encoder.yml`.
+
+Inside the pod:
+
+```bash
+source /opt/activate-openlens.sh
+cd /workspace/opensearch
+OPENLENS_EMBEDDING_BACKEND=qwen OPENLENS_QWEN_MODEL=qwen2b OPENLENS_VECTOR_DIM=768 openlens-index --skip-opensearch
+```
 
 ## Validation
 
