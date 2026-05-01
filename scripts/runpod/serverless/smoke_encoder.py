@@ -76,6 +76,7 @@ def main() -> int:
     parser.add_argument("--backend", default=os.getenv("OPENLENS_EMBEDDING_BACKEND", "colpali"))
     parser.add_argument("--model", default=os.getenv("OPENLENS_COLPALI_MODEL", "colpali-v1.3"))
     parser.add_argument("--action", default="encode", choices=["encode", "status"])
+    parser.add_argument("--full", action="store_true", help="Print full RunPod output, including returned vectors.")
     args = parser.parse_args()
 
     api_key = runpod_key()
@@ -106,8 +107,46 @@ def main() -> int:
         response.raise_for_status()
         result = wait_for_job(client, api_key, endpoint, response.json())
 
-    print(json.dumps(result, indent=2, sort_keys=True))
+    print(json.dumps(result if args.full else summarize_result(result), indent=2, sort_keys=True))
     return 0
+
+
+def summarize_result(result: dict[str, Any]) -> dict[str, Any]:
+    output = result.get("output") if isinstance(result.get("output"), dict) else {}
+    records = output.get("records") if isinstance(output.get("records"), list) else []
+    first_record = records[0] if records and isinstance(records[0], dict) else {}
+    summary: dict[str, Any] = {
+        "id": result.get("id"),
+        "status": result.get("status"),
+        "workerId": result.get("workerId"),
+        "delayTime_ms": result.get("delayTime"),
+        "executionTime_ms": result.get("executionTime"),
+    }
+    if output:
+        summary["output"] = {
+            "ok": output.get("ok"),
+            "count": output.get("count"),
+            "embedding_backend": output.get("embedding_backend"),
+            "embedding_model": output.get("embedding_model"),
+            "dimension": output.get("dimension"),
+            "elapsed_s": output.get("elapsed_s"),
+            "records_per_s": output.get("records_per_s"),
+            "patch_vectors": output.get("patch_vectors"),
+            "patch_vectors_per_record": output.get("patch_vectors_per_record"),
+        }
+    if first_record:
+        summary["first_record"] = {
+            "doc_id": first_record.get("doc_id"),
+            "title": first_record.get("title"),
+            "modality": first_record.get("modality"),
+            "patch_count": first_record.get("patch_count"),
+            "patch_vector_count": first_record.get("patch_vector_count"),
+            "vector_dim": len(first_record.get("vector") or []),
+            "colbert_vectors": len(first_record.get("colbert_vectors") or []),
+        }
+    if result.get("error"):
+        summary["error"] = result.get("error")
+    return summary
 
 
 if __name__ == "__main__":

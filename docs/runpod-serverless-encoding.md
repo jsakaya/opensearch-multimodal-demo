@@ -9,7 +9,7 @@ GPU only wakes when an explicit encoding job is submitted.
 - `make serverless-deploy` creates or updates a RunPod Serverless template and endpoint with `workersMin=0`.
 - The deploy command does not call `/run` or `/runsync`, so it should not start a worker.
 - `make serverless-smoke` is the explicit command that starts a worker for a one-record smoke job.
-- Defaults target 48 GB class GPUs first: `NVIDIA L40S`, `NVIDIA A40`, then `NVIDIA RTX A6000`.
+- Defaults target cost-minded GPU stock first: `NVIDIA L4`, `NVIDIA A40`, `NVIDIA RTX A5000`, `NVIDIA RTX A6000`, `NVIDIA GeForce RTX 4090`, then `NVIDIA L40S`.
 
 ## Commands
 
@@ -27,6 +27,10 @@ Run a tiny smoke only when we actually want to spend for a cold start:
 ```bash
 make serverless-smoke
 ```
+
+The smoke client prints a compact summary by default. Use
+`uv run python scripts/runpod/serverless/smoke_encoder.py --records 1 --full`
+only when you need the full vector payload.
 
 For larger batches, submit records via `records_url` and write encoded JSONL to
 `output_url`; that avoids moving 10,000 vector-heavy documents through the
