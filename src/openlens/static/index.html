@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenLens</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">OL</div>
+          <div>
+            <strong>OpenLens</strong>
+            <span id="statusLine">checking index</span>
+          </div>
+        </div>
+        <form id="searchForm" class="search-line">
+          <input id="queryInput" name="q" autocomplete="off" value="satellite imagery climate change" />
+          <button type="submit">Search</button>
+        </form>
+        <nav class="mode-tabs" aria-label="Search mode">
+          <button class="mode-tab is-active" data-mode="hybrid" type="button">Hybrid</button>
+          <button class="mode-tab" data-mode="keyword" type="button">BM25</button>
+          <button class="mode-tab" data-mode="vector" type="button">Vector</button>
+        </nav>
+      </header>
+
+      <main class="workspace">
+        <aside class="filter-pane">
+          <section class="facet-block">
+            <div class="pane-title">Modality</div>
+            <div id="modalityFacets" class="facet-list"></div>
+          </section>
+          <section class="facet-block">
+            <div class="pane-title">Source</div>
+            <div id="sourceFacets" class="facet-list"></div>
+          </section>
+          <section class="ingest-block">
+            <div class="pane-title">Live ingest</div>
+            <form id="ingestForm" class="ingest-form">
+              <input id="ingestTitle" name="title" autocomplete="off" placeholder="Title" />
+              <textarea id="ingestBody" name="body" rows="5" placeholder="Evidence text"></textarea>
+              <div class="compact-row">
+                <select id="ingestModality" name="modality">
+                  <option value="document">Document</option>
+                  <option value="image">Image</option>
+                  <option value="pdf">PDF</option>
+                  <option value="video">Video</option>
+                  <option value="table">Table</option>
+                </select>
+                <button type="submit">Add</button>
+              </div>
+            </form>
+          </section>
+        </aside>
+
+        <section class="result-stage">
+          <div class="metrics-row">
+            <div>
+              <span>Retriever</span>
+              <strong id="retrieverName">local</strong>
+            </div>
+            <div>
+              <span>Latency</span>
+              <strong id="latencyValue">0 ms</strong>
+            </div>
+            <div>
+              <span>Hits</span>
+              <strong id="hitCount">0</strong>
+            </div>
+            <div>
+              <span>Index</span>
+              <strong id="indexName">openlens_multimodal</strong>
+            </div>
+          </div>
+          <div id="resultList" class="result-list"></div>
+        </section>
+
+        <aside id="detailPane" class="detail-pane">
+          <div class="empty-detail">No document selected.</div>
+        </aside>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
