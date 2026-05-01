@@ -171,11 +171,18 @@ Full-power RunPod demo path:
 ```bash
 # RUNPOD_API_KEY is read from env or macOS Keychain item runpod-api-key.
 # Defaults: H200 SXM in US-CA-2 with the josephsakaya-unsloth-h100 volume.
-scripts/runpod/up.sh
-scripts/runpod/full-power-demo.sh
+make pod-up
+make gpu-demo
 ```
 
-`full-power-demo.sh` SSHes into the GPU pod, starts a single-node OpenSearch
+For a faster H200/H100 smoke before the full 10k run:
+
+```bash
+make pod-up
+make gpu-demo-small
+```
+
+`make gpu-demo` SSHes into the GPU pod, starts a single-node OpenSearch
 3.6 service if `OPENSEARCH_URL` is not already reachable, autotunes the ColPali
 batch size, builds the 10k NASA/space corpus, indexes 128-dimensional pooled
 vectors plus ColPali multi-vectors into OpenSearch, starts the API, calls

@@ -38,7 +38,7 @@ Override knobs:
 RUNPOD_GPU_ID="NVIDIA H200" \
 RUNPOD_DATA_CENTER_IDS=US-CA-2 \
 RUNPOD_VOLUME_ID=t0ys2ffnll \
-scripts/runpod/up.sh
+make pod-up
 ```
 
 For a maximum-flex benchmark run, try B200 later with:
@@ -46,8 +46,20 @@ For a maximum-flex benchmark run, try B200 later with:
 ```bash
 RUNPOD_GPU_ID="NVIDIA B200" \
 RUNPOD_DATA_CENTER_IDS=US-CA-2 \
-scripts/runpod/up.sh
+make pod-up
 ```
 
 Do that only after the H200 path is clean, because the B200 stock was low and the
 demo does not need 180 GB VRAM to show ColPali late interaction strongly.
+
+Smoke path:
+
+```bash
+make gpu-demo-small
+```
+
+Full 10k customer-demo path:
+
+```bash
+OPENLENS_TARGET_DOCS=10000 make gpu-demo
+```
