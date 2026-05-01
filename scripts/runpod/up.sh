@@ -10,8 +10,11 @@
 #   RUNPOD_POD_NAME=openlens-colpali-h200
 #   RUNPOD_GPU_ID="NVIDIA H200"
 #   RUNPOD_DATA_CENTER_IDS=US-CA-2
+#   RUNPOD_TEMPLATE_ID=r97liuwvkd
 #   RUNPOD_IMAGE=ghcr.io/jsakaya/openlens-qwen-encoder:latest
 #   RUNPOD_PUBKEY=~/.ssh/id_ed25519.pub
+#   RUNPOD_NO_NETWORK_VOLUME=1
+#   RUNPOD_VOLUME_GB=100
 
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -20,16 +23,26 @@ load_runpod_key
 NAME="${RUNPOD_POD_NAME:-openlens-colpali-h200}"
 GPU="${RUNPOD_GPU_ID:-${RUNPOD_GPU:-NVIDIA H200}}"
 DATA_CENTER_IDS="${RUNPOD_DATA_CENTER_IDS:-US-CA-2}"
+TEMPLATE_ID="${RUNPOD_TEMPLATE_ID:-r97liuwvkd}"
 IMAGE="${RUNPOD_IMAGE:-ghcr.io/jsakaya/openlens-qwen-encoder:latest}"
 PUBKEY_FILE="${RUNPOD_PUBKEY:-$HOME/.ssh/id_ed25519.pub}"
 [[ -f "$PUBKEY_FILE" ]] || { echo "no SSH public key at $PUBKEY_FILE" >&2; exit 1; }
 PUBKEY="$(cat "$PUBKEY_FILE")"
-VOLUME_ID="${RUNPOD_VOLUME_ID:-}"
-if [[ -z "$VOLUME_ID" ]]; then
-  VOLUME_NAME="${RUNPOD_VOLUME_NAME:-josephsakaya-unsloth-h100}"
-  VOLUME_ID="$(runpodctl network-volume list -o json | jq -r --arg name "$VOLUME_NAME" '.[] | select(.name == $name) | .id' | head -1)"
+
+VOLUME_ARGS=(--volume-mount-path /workspace)
+if [[ "${RUNPOD_NO_NETWORK_VOLUME:-0}" == "1" ]]; then
+  VOLUME_ARGS+=(--volume-in-gb "${RUNPOD_VOLUME_GB:-100}")
+  VOLUME_DESC="ephemeral ${RUNPOD_VOLUME_GB:-100}GB"
+else
+  VOLUME_ID="${RUNPOD_VOLUME_ID:-}"
+  if [[ -z "$VOLUME_ID" ]]; then
+    VOLUME_NAME="${RUNPOD_VOLUME_NAME:-josephsakaya-unsloth-h100}"
+    VOLUME_ID="$(runpodctl network-volume list -o json | jq -r --arg name "$VOLUME_NAME" '.[] | select(.name == $name) | .id' | head -1)"
+  fi
+  [[ -n "$VOLUME_ID" ]] || { echo "missing RUNPOD_VOLUME_ID and could not resolve RUNPOD_VOLUME_NAME" >&2; exit 1; }
+  VOLUME_ARGS+=(--network-volume-id "$VOLUME_ID")
+  VOLUME_DESC="$VOLUME_ID"
 fi
-[[ -n "$VOLUME_ID" ]] || { echo "missing RUNPOD_VOLUME_ID and could not resolve RUNPOD_VOLUME_NAME" >&2; exit 1; }
 
 if [[ -f "$STATE_DIR/pod-id" ]]; then
   echo "pod already registered: $(cat "$STATE_DIR/pod-id")" >&2
@@ -58,17 +71,23 @@ print(json.dumps({
 PY
 )
 
-echo "creating $NAME ($GPU, data centers=$DATA_CENTER_IDS, image=$IMAGE, volume=$VOLUME_ID)..." >&2
+CREATE_IMAGE_ARGS=(--image "$IMAGE")
+IMAGE_DESC="image=$IMAGE"
+if [[ -n "$TEMPLATE_ID" ]]; then
+  CREATE_IMAGE_ARGS=(--template-id "$TEMPLATE_ID")
+  IMAGE_DESC="template=$TEMPLATE_ID"
+fi
+
+echo "creating $NAME ($GPU, data centers=$DATA_CENTER_IDS, $IMAGE_DESC, volume=$VOLUME_DESC)..." >&2
 RESPONSE="$(runpodctl pod create \
   --name "$NAME" \
-  --image "$IMAGE" \
+  "${CREATE_IMAGE_ARGS[@]}" \
   --cloud-type SECURE \
   --gpu-id "$GPU" \
   --gpu-count 1 \
   --data-center-ids "$DATA_CENTER_IDS" \
   --container-disk-in-gb "${RUNPOD_CONTAINER_DISK_GB:-100}" \
-  --network-volume-id "$VOLUME_ID" \
-  --volume-mount-path /workspace \
+  "${VOLUME_ARGS[@]}" \
   --ports "22/tcp,8787/http,9200/http" \
   --env "$ENV_JSON" \
   -o json)"
@@ -89,7 +108,7 @@ runtime=d.get("runtime") or {}
 ports=runtime.get("ports") or []
 ssh=next((p for p in ports if int(p.get("privatePort",0)) == 22 and p.get("isIpPublic")), None)
 if ssh and ssh.get("ip") and ssh.get("publicPort"):
-    print(f"READY {ssh[\"ip\"]} {ssh[\"publicPort\"]}")
+    print("READY {} {}".format(ssh["ip"], ssh["publicPort"]))
 else:
     print("WAIT")
 ')"
