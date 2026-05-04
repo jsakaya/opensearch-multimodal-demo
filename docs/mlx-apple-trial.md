@@ -6,8 +6,8 @@ encoding can produce OpenLens-compatible vectors and records.
 
 ## Commands
 
-Use Python 3.12 for the full Qwen3-VL smoke. The Qwen3-VL processor still
-imports Torch/Torchvision for image preprocessing, while inference runs on MLX.
+Use Python 3.12 for the full smoke. The Qwen3-VL processor still imports
+Torch/Torchvision for image preprocessing, while inference runs on MLX.
 
 ```bash
 uv run --python 3.12 --extra mlx openlens-mlx-smoke
@@ -41,8 +41,12 @@ uv run --python 3.12 --extra mlx openlens-index \
 - `OPENLENS_EMBEDDING_BACKEND=mlx-qwen-vl` uses
   `mlx-community/Qwen3-VL-Embedding-2B-6bit` by default and emits
   2048-dimensional image/text vectors.
+- `OPENLENS_EMBEDDING_BACKEND=mlx-colqwen` uses
+  `qnguyen3/colqwen2_5-v0.2-mlx-4bit` by default and emits 128-dimensional
+  token multi-vectors for late-interaction smoke tests over text patches.
 - The OpenSearch API reports MLX import/device status through `/api/status`.
 
 The current local MLX path is a trial backend, not a complete replacement for
-the RunPod CUDA modality router. PDF visual late interaction through ColQwen /
-ColPali-style MLX weights is the next piece to harden after the Qwen3-VL smoke.
+the RunPod CUDA modality router. The ColQwen path verifies MLX token
+multi-vectors for PDF-style patch reranking; rendered-page visual ColPali
+coverage is still the next hardening target.

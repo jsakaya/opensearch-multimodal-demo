@@ -331,4 +331,12 @@ def make_embedder(
             model_name=os.getenv("OPENLENS_MLX_QWEN_VL_MODEL", "mlx-community/Qwen3-VL-Embedding-2B-6bit"),
             dimension=dimension,
         )
+    if backend in {"mlx-colqwen", "mlx-colpali"}:
+        from .mlx_embedder import MlxColQwenEmbedder
+
+        return MlxColQwenEmbedder(
+            model_name=os.getenv("OPENLENS_MLX_COLQWEN_MODEL", "qnguyen3/colqwen2_5-v0.2-mlx-4bit"),
+            dimension=dimension,
+            max_patch_vectors=colpali_max_patch_vectors,
+        )
     return FeatureHashEmbedder(dimension=dimension)

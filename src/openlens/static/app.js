@@ -103,7 +103,14 @@ function embeddingLabel(payload) {
     const device = runtime.cuda_available ? runtime.device_name || "CUDA" : runtime.device || "no GPU";
     return `${payload.colpali_model || "ColPali"} ${dim} · ${device}`;
   }
-  if (backend === "mlx" || backend === "mlx-text" || backend === "mlx-qwen-vl" || backend === "mlx-vl") {
+  if (
+    backend === "mlx" ||
+    backend === "mlx-text" ||
+    backend === "mlx-qwen-vl" ||
+    backend === "mlx-vl" ||
+    backend === "mlx-colqwen" ||
+    backend === "mlx-colpali"
+  ) {
     const runtime = payload.mlx_runtime || {};
     return `${payload.embedding_model || payload.mlx_text_model || "MLX"} ${dim} · ${runtime.default_device || "Apple GPU"}`;
   }

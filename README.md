@@ -197,9 +197,9 @@ uv run --python 3.12 --extra mlx openlens-index \
   --skip-opensearch
 ```
 
-See `docs/mlx-apple-trial.md` for the current boundary: Qwen3 text and Qwen3-VL
-image/text smoke work locally, while ColPali/ColQwen-style MLX late interaction
-is the next hardening target.
+See `docs/mlx-apple-trial.md` for the current boundary: Qwen3 text, Qwen3-VL
+image/text, and ColQwen token multi-vector smoke tests work locally, while
+rendered-page visual ColPali coverage is the next hardening target.
 
 Full-power RunPod demo path:
 

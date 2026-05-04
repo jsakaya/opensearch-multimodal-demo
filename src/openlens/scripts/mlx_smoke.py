@@ -7,7 +7,7 @@ from pathlib import Path
 
 from openlens.data import write_jsonl
 from openlens.indexer import prepare_record
-from openlens.mlx_embedder import MlxQwenVlEmbedder, MlxTextEmbedder, mlx_runtime_status
+from openlens.mlx_embedder import MlxColQwenEmbedder, MlxQwenVlEmbedder, MlxTextEmbedder, mlx_runtime_status
 from openlens.models import Asset, OpenRecord
 
 
@@ -15,7 +15,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run a tiny Apple MLX embedding smoke for OpenLens.")
     parser.add_argument("--text-model", default="mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ")
     parser.add_argument("--qwen-vl-model", default="mlx-community/Qwen3-VL-Embedding-2B-6bit")
+    parser.add_argument("--colqwen-model", default="qnguyen3/colqwen2_5-v0.2-mlx-4bit")
     parser.add_argument("--skip-qwen-vl", action="store_true")
+    parser.add_argument("--skip-colqwen", action="store_true")
     parser.add_argument("--output", default="data/processed/mlx_smoke_embedded.jsonl")
     args = parser.parse_args()
 
@@ -61,6 +63,25 @@ def main() -> int:
         rows.append(indexed_image.model_dump(mode="json"))
         qwen_vl_shape = [len(indexed_image.vector)]
 
+    colqwen_vectors = 0
+    if not args.skip_colqwen:
+        colqwen = MlxColQwenEmbedder(model_name=args.colqwen_model, dimension=128)
+        pdf_record = OpenRecord(
+            doc_id="mlx-smoke-colqwen",
+            source="MLX smoke",
+            source_id="mlx-smoke-colqwen",
+            source_url="urn:openlens:mlx-smoke-colqwen",
+            modality="pdf",
+            title="ColQwen late interaction smoke",
+            summary="Token multi-vector smoke for PDF-style patch retrieval.",
+            body="Mars ascent chart with thermal margin notes and Artemis mission control evidence.",
+            license="Local smoke",
+            tags=["mlx", "colqwen", "late-interaction"],
+        )
+        indexed_pdf = prepare_record(pdf_record, colqwen)
+        rows.append(indexed_pdf.model_dump(mode="json"))
+        colqwen_vectors = indexed_pdf.patch_vector_count
+
     output = Path(args.output)
     write_jsonl(output, rows)
     payload = {
@@ -70,6 +91,8 @@ def main() -> int:
         "text_vector_dim": len(text_vector),
         "qwen_vl_model": "" if args.skip_qwen_vl else args.qwen_vl_model,
         "qwen_vl_vector_dim": qwen_vl_shape[0] if qwen_vl_shape else 0,
+        "colqwen_model": "" if args.skip_colqwen else args.colqwen_model,
+        "colqwen_patch_vectors": colqwen_vectors,
         "records": len(rows),
         "output": str(output),
         "elapsed_s": round(time.perf_counter() - started, 2),

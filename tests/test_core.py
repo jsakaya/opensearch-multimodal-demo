@@ -201,6 +201,12 @@ def test_mlx_backend_defaults_to_text_embedding_dimension(monkeypatch) -> None:
     assert Settings().vector_dim == 1024
 
 
+def test_mlx_colqwen_backend_defaults_to_late_interaction_dimension(monkeypatch) -> None:
+    monkeypatch.setenv("OPENLENS_EMBEDDING_BACKEND", "mlx-colqwen")
+    monkeypatch.delenv("OPENLENS_VECTOR_DIM", raising=False)
+    assert Settings().vector_dim == 128
+
+
 def test_mlx_runtime_status_is_nonfatal_without_extra() -> None:
     status = mlx_runtime_status()
     assert "available" in status

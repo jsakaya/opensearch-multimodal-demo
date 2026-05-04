@@ -5,13 +5,14 @@ from typing import Any
 
 import numpy as np
 
-from .embeddings import FeatureHashEmbedder, normalize
+from .embeddings import FeatureHashEmbedder, mean_pool, normalize
 from .models import OpenRecord, Patch
 from .text import compose_search_text
 
 
 DEFAULT_MLX_TEXT_MODEL = "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
 DEFAULT_MLX_QWEN_VL_MODEL = "mlx-community/Qwen3-VL-Embedding-2B-6bit"
+DEFAULT_MLX_COLQWEN_MODEL = "qnguyen3/colqwen2_5-v0.2-mlx-4bit"
 
 
 class MlxEmbedderError(RuntimeError):
@@ -177,6 +178,75 @@ class MlxQwenVlEmbedder(FeatureHashEmbedder):
             return [_fit_dimension(row, self.dimension) for row in _as_numpy_rows(embeddings)]
         except Exception as exc:
             raise MlxEmbedderError(f"Failed to encode with {self.model_name}: {exc}") from exc
+
+
+class MlxColQwenEmbedder(FeatureHashEmbedder):
+    """ColQwen MLX token multi-vector provider for late-interaction smoke tests."""
+
+    def __init__(
+        self,
+        model_name: str = DEFAULT_MLX_COLQWEN_MODEL,
+        dimension: int = 128,
+        max_patch_vectors: int = 512,
+    ):
+        super().__init__(dimension=dimension)
+        self.backend = "mlx-colqwen"
+        self.model_name = model_name
+        self.max_patch_vectors = int(max_patch_vectors)
+        self._model = None
+        self._processor = None
+        self._cache_cls = None
+
+    def _load_model(self) -> None:
+        if self._model is not None:
+            return
+        try:
+            from mlx_embeddings import load
+            from mlx_vlm.models.qwen2_5_vl.language import KVCache
+        except Exception as exc:
+            raise MlxEmbedderError(
+                "ColQwen MLX dependencies are missing. Run with Python 3.12 and `uv sync --extra mlx`."
+            ) from exc
+        try:
+            self._model, self._processor = load(self.model_name)
+            self._cache_cls = KVCache
+        except Exception as exc:
+            raise MlxEmbedderError(f"Failed to load MLX ColQwen model {self.model_name}: {exc}") from exc
+
+    def embed_text(self, text: str) -> list[float]:
+        return mean_pool(self.embed_query_patches(text), self.dimension)
+
+    def embed_record(self, record: OpenRecord) -> list[float]:
+        return mean_pool(self.embed_patches(self.patch_record(record)), self.dimension)
+
+    def embed_patches(self, patches: list[Patch]) -> list[list[float]]:
+        vectors: list[list[float]] = []
+        for patch in patches:
+            vectors.extend(self._encode_token_vectors(patch.text or ""))
+            if len(vectors) >= self.max_patch_vectors:
+                break
+        return vectors[: self.max_patch_vectors] or super().embed_patches(patches)
+
+    def embed_query_patches(self, query: str, max_patches: int = 32) -> list[list[float]]:
+        return self._encode_token_vectors(query)[:max_patches]
+
+    def _encode_token_vectors(self, text: str) -> list[list[float]]:
+        self._load_model()
+        try:
+            import mlx.core as mx
+
+            inputs = self._processor(text=[text], return_tensors="mlx", padding=True)
+            inputs = {key: mx.array(value) if not isinstance(value, mx.array) else value for key, value in inputs.items()}
+            cache = [self._cache_cls() for _ in range(len(self._model.vlm.language_model.model.layers))]
+            out = self._model(**inputs, cache=cache)
+            embeddings = getattr(out, "text_embeds", out)
+            mx.eval(embeddings)
+            rows = _as_numpy_rows(embeddings)
+            if rows.ndim == 3:
+                rows = rows.reshape(-1, rows.shape[-1])
+            return [_fit_dimension(row, self.dimension) for row in rows if np.linalg.norm(row) > 1e-8]
+        except Exception as exc:
+            raise MlxEmbedderError(f"Failed to encode ColQwen vectors with {self.model_name}: {exc}") from exc
 
 
 def _with_image_token(text: str) -> str:

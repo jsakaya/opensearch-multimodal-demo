@@ -26,6 +26,8 @@ def _vector_dim_from_env() -> int:
         return 1024
     if backend in {"mlx-qwen-vl", "mlx-vl"}:
         return 2048
+    if backend in {"mlx-colqwen", "mlx-colpali"}:
+        return 128
     if backend == "qwen":
         return 4096
     if backend == "colpali":
@@ -63,6 +65,9 @@ class Settings:
     )
     mlx_qwen_vl_model: str = field(
         default_factory=lambda: os.getenv("OPENLENS_MLX_QWEN_VL_MODEL", "mlx-community/Qwen3-VL-Embedding-2B-6bit")
+    )
+    mlx_colqwen_model: str = field(
+        default_factory=lambda: os.getenv("OPENLENS_MLX_COLQWEN_MODEL", "qnguyen3/colqwen2_5-v0.2-mlx-4bit")
     )
     require_opensearch: bool = field(default_factory=lambda: os.getenv("OPENLENS_REQUIRE_OPENSEARCH", "1") != "0")
     docs_path: Path = field(default_factory=lambda: _path_from_env("OPENLENS_DOCS", "data/processed/open_corpus.jsonl"))

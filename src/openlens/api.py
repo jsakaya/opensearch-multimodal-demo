@@ -129,6 +129,7 @@ def status() -> dict[str, Any]:
         "colpali_runtime": colpali_runtime_status(),
         "mlx_text_model": settings.mlx_text_model,
         "mlx_qwen_vl_model": settings.mlx_qwen_vl_model,
+        "mlx_colqwen_model": settings.mlx_colqwen_model,
         "mlx_runtime": mlx_runtime_status(),
         "modality_routing": _modality_routing_status(settings),
         "require_opensearch": settings.require_opensearch,
@@ -192,6 +193,8 @@ def _embedding_model_label(settings: Any) -> str:
         return settings.mlx_text_model
     if settings.embedding_backend in {"mlx-qwen-vl", "mlx-vl"}:
         return settings.mlx_qwen_vl_model
+    if settings.embedding_backend in {"mlx-colqwen", "mlx-colpali"}:
+        return settings.mlx_colqwen_model
     return "feature-hash"
 
 
