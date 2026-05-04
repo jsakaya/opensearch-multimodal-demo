@@ -317,4 +317,18 @@ def make_embedder(
             max_patch_vectors=colpali_max_patch_vectors,
             image_timeout_s=colpali_image_timeout_s,
         )
+    if backend in {"mlx", "mlx-text"}:
+        from .mlx_embedder import MlxTextEmbedder
+
+        return MlxTextEmbedder(
+            model_name=os.getenv("OPENLENS_MLX_TEXT_MODEL", "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"),
+            dimension=dimension,
+        )
+    if backend in {"mlx-qwen-vl", "mlx-vl"}:
+        from .mlx_embedder import MlxQwenVlEmbedder
+
+        return MlxQwenVlEmbedder(
+            model_name=os.getenv("OPENLENS_MLX_QWEN_VL_MODEL", "mlx-community/Qwen3-VL-Embedding-2B-6bit"),
+            dimension=dimension,
+        )
     return FeatureHashEmbedder(dimension=dimension)

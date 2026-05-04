@@ -14,6 +14,7 @@ from .config import get_settings
 from .colpali_embedder import ColPaliEmbedderError, colpali_runtime_status
 from .data import append_or_replace_jsonl, stable_id
 from .indexer import VECTOR_SOURCE_FIELDS, bulk_index, check_status, make_client, prepare_record, recreate_index
+from .mlx_embedder import mlx_runtime_status
 from .models import Asset, Modality, OpenRecord
 from .qwen_embedder import QwenEmbedderError, make_embedder, qwen_runtime_status
 from .retrieval import LocalRetriever, OpenSearchRetriever, SearchMode, make_retriever
@@ -126,6 +127,9 @@ def status() -> dict[str, Any]:
         "colpali_max_pages": settings.colpali_max_pages,
         "colpali_max_patch_vectors": settings.colpali_max_patch_vectors,
         "colpali_runtime": colpali_runtime_status(),
+        "mlx_text_model": settings.mlx_text_model,
+        "mlx_qwen_vl_model": settings.mlx_qwen_vl_model,
+        "mlx_runtime": mlx_runtime_status(),
         "modality_routing": _modality_routing_status(settings),
         "require_opensearch": settings.require_opensearch,
     }
@@ -184,6 +188,10 @@ def _embedding_model_label(settings: Any) -> str:
         return settings.qwen_model
     if settings.embedding_backend == "colpali":
         return settings.colpali_model
+    if settings.embedding_backend in {"mlx", "mlx-text"}:
+        return settings.mlx_text_model
+    if settings.embedding_backend in {"mlx-qwen-vl", "mlx-vl"}:
+        return settings.mlx_qwen_vl_model
     return "feature-hash"
 
 

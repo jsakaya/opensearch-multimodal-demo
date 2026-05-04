@@ -42,12 +42,20 @@ audio = [
     "torch>=2.4.0; python_version < '3.13'",
     "transformers>=4.57.0",
 ]
+mlx = [
+    "mlx>=0.29.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "mlx-embeddings>=0.1.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "pillow>=11.0.0",
+    "torch>=2.4.0; python_version < '3.13'",
+    "torchvision>=0.19.0; python_version < '3.13'",
+]
 
 [project.scripts]
 openlens-api = "openlens.api:main"
 openlens-build = "openlens.scripts.build_open_corpus:main"
 openlens-benchmark = "openlens.scripts.benchmark_retrieval:main"
 openlens-index = "openlens.scripts.index_open_corpus:main"
+openlens-mlx-smoke = "openlens.scripts.mlx_smoke:main"
 openlens-colpali-benchmark = "openlens.scripts.benchmark_colpali:main"
 openlens-qwen-benchmark = "openlens.scripts.benchmark_qwen:main"
 openlens-smoke = "openlens.scripts.smoke_demo:main"

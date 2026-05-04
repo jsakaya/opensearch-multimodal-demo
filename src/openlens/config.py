@@ -22,6 +22,10 @@ def _vector_dim_from_env() -> int:
     backend = os.getenv("OPENLENS_EMBEDDING_BACKEND")
     if backend in {"modality-router", "modality", "routed"}:
         return 384
+    if backend in {"mlx", "mlx-text"}:
+        return 1024
+    if backend in {"mlx-qwen-vl", "mlx-vl"}:
+        return 2048
     if backend == "qwen":
         return 4096
     if backend == "colpali":
@@ -53,6 +57,12 @@ class Settings:
     )
     colpali_image_timeout_s: float = field(
         default_factory=lambda: float(os.getenv("OPENLENS_COLPALI_IMAGE_TIMEOUT_S", "20"))
+    )
+    mlx_text_model: str = field(
+        default_factory=lambda: os.getenv("OPENLENS_MLX_TEXT_MODEL", "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ")
+    )
+    mlx_qwen_vl_model: str = field(
+        default_factory=lambda: os.getenv("OPENLENS_MLX_QWEN_VL_MODEL", "mlx-community/Qwen3-VL-Embedding-2B-6bit")
     )
     require_opensearch: bool = field(default_factory=lambda: os.getenv("OPENLENS_REQUIRE_OPENSEARCH", "1") != "0")
     docs_path: Path = field(default_factory=lambda: _path_from_env("OPENLENS_DOCS", "data/processed/open_corpus.jsonl"))

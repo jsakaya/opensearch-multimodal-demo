@@ -179,6 +179,28 @@ See `docs/runpod-gpu-plan.md` for the current `runpodctl` GPU/volume choice.
 On local macOS Python 3.13, the base demo works, but the Torch-backed ColPali
 and Qwen extras are intended for Python 3.10-3.12 or the RunPod CUDA image.
 
+## Apple MLX Trial
+
+On Apple Silicon, a smaller MLX trial can run local Qwen embeddings on the Apple
+GPU:
+
+```bash
+uv run --python 3.12 --extra mlx openlens-mlx-smoke
+```
+
+For indexing a small corpus with MLX text vectors:
+
+```bash
+OPENLENS_EMBEDDING_BACKEND=mlx \
+uv run --python 3.12 --extra mlx openlens-index \
+  --input data/processed/space_sample.jsonl \
+  --skip-opensearch
+```
+
+See `docs/mlx-apple-trial.md` for the current boundary: Qwen3 text and Qwen3-VL
+image/text smoke work locally, while ColPali/ColQwen-style MLX late interaction
+is the next hardening target.
+
 Full-power RunPod demo path:
 
 ```bash

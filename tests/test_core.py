@@ -7,6 +7,7 @@ from openlens.api import InlineIngestRequest, inline_request_to_record
 from openlens.data import write_jsonl
 from openlens.embeddings import FeatureHashEmbedder, late_interaction_score
 from openlens.indexer import opensearch_source, prepare_record
+from openlens.mlx_embedder import mlx_runtime_status
 from openlens.modality_embedder import ModalityRouterEmbedder
 from openlens.models import Asset, OpenRecord
 from openlens.qwen_embedder import qwen_runtime_status
@@ -192,6 +193,17 @@ def test_modality_router_is_default_backend(monkeypatch) -> None:
     settings = Settings()
     assert settings.embedding_backend == "modality-router"
     assert settings.vector_dim == 384
+
+
+def test_mlx_backend_defaults_to_text_embedding_dimension(monkeypatch) -> None:
+    monkeypatch.setenv("OPENLENS_EMBEDDING_BACKEND", "mlx")
+    monkeypatch.delenv("OPENLENS_VECTOR_DIM", raising=False)
+    assert Settings().vector_dim == 1024
+
+
+def test_mlx_runtime_status_is_nonfatal_without_extra() -> None:
+    status = mlx_runtime_status()
+    assert "available" in status
 
 
 def test_modality_router_populates_video_audio_pdf_table_fields() -> None:
