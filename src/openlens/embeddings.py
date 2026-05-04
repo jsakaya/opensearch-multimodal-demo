@@ -135,7 +135,7 @@ class FeatureHashEmbedder:
             chunks = chunk_text(record.body or record.summary or record.title, patch_chars) or [record.title]
             duration_s = next((asset.duration_s for asset in record.assets if asset.duration_s), None)
             video_asset = record.assets[0] if record.assets else None
-            video_asset_url = (video_asset.thumbnail_url or video_asset.url) if video_asset else ""
+            video_asset_url = video_asset.url if video_asset else ""
             spans = expected_chunk_spans(duration_s or len(chunks) * 30, chunk_duration_s=30, overlap_s=5)
             for idx, chunk in enumerate(chunks):
                 span = spans[min(idx, len(spans) - 1)]

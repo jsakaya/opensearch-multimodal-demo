@@ -28,6 +28,23 @@ function firstThumb(hit) {
   return asset ? asset.thumbnail_url || asset.url : "";
 }
 
+function playableAsset(hit, kind) {
+  const assets = hit.assets || [];
+  const mediaKind = String(kind || hit.modality || "");
+  if (mediaKind.startsWith("audio") || hit.modality === "audio") {
+    return assets.find((item) => String(item.kind).includes("audio") || String(item.mime_type).includes("audio"));
+  }
+  if (mediaKind.startsWith("video") || hit.modality === "video") {
+    return assets.find((item) => String(item.kind).includes("video") || String(item.mime_type).includes("video"));
+  }
+  return null;
+}
+
+function mediaSrc(value) {
+  const text = String(value || "").trim();
+  return text ? `/api/media?url=${encodeURIComponent(text)}` : "";
+}
+
 function score(value) {
   const n = Number(value || 0);
   return n >= 10 ? n.toFixed(2) : n.toFixed(4);
@@ -57,7 +74,37 @@ function evidenceFor(hit) {
       : patch.page ? `p${patch.page}` : `#${Number(patch.ordinal || 0) + 1}`,
     text: patch.text || "",
     matched_terms: [],
+    page: patch.page,
+    start_s: patch.start_s,
+    end_s: patch.end_s,
+    asset_url: patch.asset_url || patch.source_file || "",
   }));
+}
+
+function segmentFor(hit, item) {
+  const kind = String(item.kind || hit.modality || "");
+  const isAudio = kind.startsWith("audio") || hit.modality === "audio";
+  const isVideo = kind.startsWith("video") || hit.modality === "video";
+  const start = Number(item.start_s);
+  const end = Number(item.end_s);
+  if ((!isAudio && !isVideo) || !Number.isFinite(start)) return null;
+  const asset = playableAsset(hit, kind);
+  const source = item.asset_url || asset?.url || "";
+  if (!source) return null;
+  return {
+    type: isVideo ? "video" : "audio",
+    src: mediaSrc(source),
+    start,
+    end: Number.isFinite(end) && end > start ? end : null,
+    label: item.loc || `${Math.round(start)}s`,
+  };
+}
+
+function formatSegment(segment) {
+  if (!segment) return "";
+  return segment.end === null
+    ? `${Math.round(segment.start)}s`
+    : `${Math.round(segment.start)}-${Math.round(segment.end)}s`;
 }
 
 function showToast(message) {
@@ -214,7 +261,7 @@ function renderResults() {
       </div>
       ${
         thumb
-          ? `<img class="thumb" src="${esc(thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+          ? `<img class="thumb" src="${esc(mediaSrc(thumb))}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
           : `<div class="rank-chip">#${hit.rank}</div>`
       }
     `;
@@ -239,16 +286,25 @@ function renderDetail(hit) {
     .map(([key, value]) => `<div class="kv-row"><div class="kv-key">${esc(key)}</div><div class="kv-value">${esc(value)}</div></div>`)
     .join("");
   const tags = (hit.tags || []).slice(0, 10).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("");
-  const evidence = evidenceFor(hit)
-    .slice(0, 10)
-    .map((item) => {
+  const evidenceItems = evidenceFor(hit).slice(0, 10);
+  const firstSegment = evidenceItems.map((item) => segmentFor(hit, item)).find(Boolean);
+  const evidence = evidenceItems
+    .map((item, index) => {
       const terms = item.matched_terms || [];
       const termBadges = terms.map((term) => `<span>${esc(term)}</span>`).join("");
+      const segment = segmentFor(hit, item);
       return `
         <div class="evidence-row" data-kind="${esc(item.kind || "patch")}">
           <div class="evidence-loc">${esc(item.loc || "")}</div>
           <div class="evidence-copy">
-            <strong>${esc(item.kind || "patch")}</strong>
+            <div class="evidence-head">
+              <strong>${esc(item.kind || "patch")}</strong>
+              ${
+                segment
+                  ? `<button class="segment-button" type="button" data-segment-index="${index}">Play ${esc(formatSegment(segment))}</button>`
+                  : ""
+              }
+            </div>
             <p>${highlightTerms(item.text || "", terms)}</p>
             ${termBadges ? `<div class="evidence-terms">${termBadges}</div>` : ""}
           </div>
@@ -257,7 +313,7 @@ function renderDetail(hit) {
     })
     .join("");
   pane.innerHTML = `
-    ${thumb ? `<img class="detail-media" src="${esc(thumb)}" alt="" referrerpolicy="no-referrer" />` : ""}
+    ${thumb ? `<img class="detail-media" src="${esc(mediaSrc(thumb))}" alt="" referrerpolicy="no-referrer" />` : ""}
     <h2>${esc(hit.title)}</h2>
     <div class="detail-meta">${esc(hit.modality)} &middot; ${esc(hit.source)} &middot; ${esc(hit.license)}</div>
     <div class="embedding-strip">
@@ -273,9 +329,50 @@ function renderDetail(hit) {
         ? `<a href="${esc(hit.source_url)}" target="_blank" rel="noreferrer">Open source record</a>`
         : ""
     }
+    ${
+      firstSegment
+        ? `<div class="segment-player" id="segmentPlayer"><div class="segment-player-empty">Select an evidence segment to play.</div></div>`
+        : ""
+    }
     ${evidence ? `<div class="evidence-title">Evidence trail</div><div class="evidence-list">${evidence}</div>` : ""}
     ${rows ? `<div class="kv-list">${rows}</div>` : ""}
   `;
+  pane.querySelectorAll(".segment-button").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const index = Number(button.dataset.segmentIndex);
+      playSegment(hit, evidenceItems[index]);
+    });
+  });
+}
+
+function playSegment(hit, item) {
+  const segment = segmentFor(hit, item || {});
+  const player = $("segmentPlayer");
+  if (!segment || !player) {
+    showToast("No playable segment");
+    return;
+  }
+  const tag = segment.type === "video" ? "video" : "audio";
+  player.innerHTML = `
+    <div class="segment-player-label">${esc(segment.type)} segment ${esc(formatSegment(segment))}</div>
+    <${tag} class="segment-media" controls playsinline preload="metadata" src="${esc(segment.src)}"></${tag}>
+  `;
+  const media = player.querySelector(".segment-media");
+  const stopAtEnd = () => {
+    if (segment.end !== null && media.currentTime >= segment.end) {
+      media.pause();
+      media.removeEventListener("timeupdate", stopAtEnd);
+    }
+  };
+  const seekAndPlay = () => {
+    media.currentTime = segment.start;
+    media.play().catch(() => showToast("Media needs a click to play"));
+  };
+  media.addEventListener("loadedmetadata", seekAndPlay, { once: true });
+  media.addEventListener("timeupdate", stopAtEnd);
+  media.addEventListener("error", () => showToast("Media could not be loaded"), { once: true });
+  media.load();
 }
 
 async function ingest(event) {

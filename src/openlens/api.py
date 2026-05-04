@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import mimetypes
 import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -102,6 +105,18 @@ def index() -> str:
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
     return Response(status_code=204)
+
+
+@app.get("/api/media")
+def media(url: str = Query(..., min_length=1)) -> Response:
+    value = str(url).strip()
+    parsed = urlparse(value)
+    if parsed.scheme in {"http", "https"}:
+        return RedirectResponse(_resolve_remote_media(value), status_code=307)
+
+    path = _local_media_path(value, get_settings().root)
+    media_type, _encoding = mimetypes.guess_type(str(path))
+    return FileResponse(path, media_type=media_type)
 
 
 @app.get("/api/status")
@@ -210,6 +225,66 @@ def _modality_routing_status(settings: Any) -> dict[str, Any]:
             "pdf": "pdf_vector + colbert_vectors",
         },
     }
+
+
+def _local_media_path(value: str, root: Path) -> Path:
+    raw = value.removeprefix("file://")
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = root / path
+    root_path = root.resolve()
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(root_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Local media must be inside the project root.") from exc
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="Local media not found.")
+    return resolved
+
+
+@lru_cache(maxsize=256)
+def _resolve_remote_media(value: str) -> str:
+    if not urlparse(value).path.endswith("/collection.json"):
+        return value
+    try:
+        links = httpx.get(value, timeout=20, follow_redirects=True).json()
+    except Exception:
+        return value
+    return _select_playable_url(links, value)
+
+
+def _select_playable_url(links: Any, fallback: str) -> str:
+    if not isinstance(links, list):
+        return fallback
+    values = [str(link) for link in links if isinstance(link, str)]
+    playable = [
+        value
+        for value in values
+        if Path(urlparse(value).path).suffix.lower() in {".mp4", ".m4v", ".mov", ".webm", ".mp3", ".m4a", ".wav", ".ogg"}
+    ]
+    if not playable:
+        return fallback
+    preferences = [
+        "~medium.mp4",
+        "~large.mp4",
+        "~mobile.mp4",
+        "~preview.mp4",
+        ".mp4",
+        ".webm",
+        ".m4v",
+        ".mov",
+        ".mp3",
+        ".m4a",
+        ".wav",
+        ".ogg",
+    ]
+    lowered = [(value.lower(), value) for value in playable]
+    for suffix in preferences:
+        match = next((value for lower, value in lowered if lower.endswith(suffix)), None)
+        if match:
+            return match
+    return playable[0]
 
 
 @app.get("/api/search")

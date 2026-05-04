@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from openlens.audio_embedder import _pooled_feature_tensor
 from openlens.config import Settings
-from openlens.api import InlineIngestRequest, inline_request_to_record
+from openlens.api import InlineIngestRequest, _local_media_path, _select_playable_url, inline_request_to_record
 from openlens.data import write_jsonl
 from openlens.embeddings import FeatureHashEmbedder, late_interaction_score
 from openlens.indexer import opensearch_source, prepare_record
@@ -163,6 +163,26 @@ def test_inline_ingest_request_becomes_stable_record() -> None:
     assert "live" in first.tags
 
 
+def test_local_media_path_stays_under_project_root(tmp_path) -> None:
+    media = tmp_path / "data" / "clip.wav"
+    media.parent.mkdir(parents=True)
+    media.write_bytes(b"RIFF")
+    assert _local_media_path("data/clip.wav", tmp_path) == media.resolve()
+
+
+def test_nasa_collection_picker_prefers_medium_video() -> None:
+    selected = _select_playable_url(
+        [
+            "https://example.test/movie~orig.mp4",
+            "https://example.test/movie.srt",
+            "https://example.test/movie~medium.mp4",
+            "https://example.test/movie~mobile.mp4",
+        ],
+        "https://example.test/collection.json",
+    )
+    assert selected.endswith("movie~medium.mp4")
+
+
 def test_sentry_style_video_chunk_helpers() -> None:
     spans = expected_chunk_spans(65, chunk_duration_s=30, overlap_s=5)
     assert [(span.start_s, span.end_s) for span in spans] == [(0.0, 30.0), (25.0, 55.0), (50.0, 65.0)]
@@ -230,6 +250,7 @@ def test_modality_router_populates_video_audio_pdf_table_fields() -> None:
     assert len(indexed_video.qwen_vector) == 4096
     assert indexed_video.chunk_strategy.startswith("sentrysearch-video")
     assert any(step["field"] == "qwen_vector" for step in indexed_video.encoder_plan)
+    assert any(patch.asset_url == "https://example.test/rover.mp4" for patch in indexed_video.patches)
 
     audio = make_record("aud-router", "Mission control loop", "Controllers discuss orbit insertion.", "audio")
     audio.assets = [Asset(kind="audio", url="https://example.test/loop.mp3", mime_type="audio/mpeg", duration_s=45)]
