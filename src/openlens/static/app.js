@@ -24,8 +24,11 @@ function compact(value) {
 
 function firstThumb(hit) {
   const assets = hit.assets || [];
-  const asset = assets.find((item) => item.thumbnail_url || item.url);
-  return asset ? asset.thumbnail_url || asset.url : "";
+  const asset = assets.find(
+    (item) => item.thumbnail_url || String(item.kind).includes("image") || String(item.mime_type).includes("image")
+  );
+  if (!asset) return "";
+  return asset.thumbnail_url || asset.url || "";
 }
 
 function playableAsset(hit, kind) {
@@ -313,7 +316,15 @@ function renderDetail(hit) {
     })
     .join("");
   pane.innerHTML = `
-    ${thumb ? `<img class="detail-media" src="${esc(mediaSrc(thumb))}" alt="" referrerpolicy="no-referrer" />` : ""}
+    ${
+      thumb || firstSegment
+        ? `<div class="detail-media-frame ${thumb ? "" : "is-empty"}" id="detailPreview">${
+            thumb
+              ? `<img class="detail-media" src="${esc(mediaSrc(thumb))}" alt="" referrerpolicy="no-referrer" />`
+              : `<div class="detail-media-placeholder">${esc(firstSegment.type)} segment preview</div>`
+          }</div>`
+        : ""
+    }
     <h2>${esc(hit.title)}</h2>
     <div class="detail-meta">${esc(hit.modality)} &middot; ${esc(hit.source)} &middot; ${esc(hit.license)}</div>
     <div class="embedding-strip">
@@ -327,11 +338,6 @@ function renderDetail(hit) {
     ${
       hit.source_url
         ? `<a href="${esc(hit.source_url)}" target="_blank" rel="noreferrer">Open source record</a>`
-        : ""
-    }
-    ${
-      firstSegment
-        ? `<div class="segment-player" id="segmentPlayer"><div class="segment-player-empty">Select an evidence segment to play.</div></div>`
         : ""
     }
     ${evidence ? `<div class="evidence-title">Evidence trail</div><div class="evidence-list">${evidence}</div>` : ""}
@@ -348,17 +354,19 @@ function renderDetail(hit) {
 
 function playSegment(hit, item) {
   const segment = segmentFor(hit, item || {});
-  const player = $("segmentPlayer");
-  if (!segment || !player) {
+  const preview = $("detailPreview");
+  if (!segment || !preview) {
     showToast("No playable segment");
     return;
   }
   const tag = segment.type === "video" ? "video" : "audio";
-  player.innerHTML = `
+  preview.classList.remove("is-empty");
+  preview.classList.add("is-playing");
+  preview.innerHTML = `
     <div class="segment-player-label">${esc(segment.type)} segment ${esc(formatSegment(segment))}</div>
-    <${tag} class="segment-media" controls playsinline preload="metadata" src="${esc(segment.src)}"></${tag}>
+    <${tag} class="detail-segment-media" controls playsinline preload="metadata" src="${esc(segment.src)}"></${tag}>
   `;
-  const media = player.querySelector(".segment-media");
+  const media = preview.querySelector(".detail-segment-media");
   const stopAtEnd = () => {
     if (segment.end !== null && media.currentTime >= segment.end) {
       media.pause();
