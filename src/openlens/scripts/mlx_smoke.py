@@ -66,17 +66,19 @@ def main() -> int:
     colqwen_vectors = 0
     if not args.skip_colqwen:
         colqwen = MlxColQwenEmbedder(model_name=args.colqwen_model, dimension=128)
+        pdf_path = _make_smoke_pdf()
         pdf_record = OpenRecord(
             doc_id="mlx-smoke-colqwen",
             source="MLX smoke",
             source_id="mlx-smoke-colqwen",
             source_url="urn:openlens:mlx-smoke-colqwen",
             modality="pdf",
-            title="ColQwen late interaction smoke",
-            summary="Token multi-vector smoke for PDF-style patch retrieval.",
-            body="Mars ascent chart with thermal margin notes and Artemis mission control evidence.",
+            title="Rendered ColQwen PDF smoke",
+            summary="Rendered-page token multi-vector smoke for PDF visual retrieval.",
+            body="Mars ascent chart with thermal margin notes and Artemis mission control evidence printed on the rendered page.",
             license="Local smoke",
             tags=["mlx", "colqwen", "late-interaction"],
+            assets=[Asset(kind="pdf", url=str(pdf_path), mime_type="application/pdf")],
         )
         indexed_pdf = prepare_record(pdf_record, colqwen)
         rows.append(indexed_pdf.model_dump(mode="json"))
@@ -111,6 +113,23 @@ def _make_smoke_image() -> Path:
     draw.ellipse((52, 52, 172, 172), fill="white")
     draw.text((52, 184), "moon", fill="white")
     image.save(path)
+    return path
+
+
+def _make_smoke_pdf() -> Path:
+    from PIL import Image, ImageDraw
+
+    path = Path("data/processed/mlx_smoke_report.pdf")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = Image.new("RGB", (900, 1200), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((72, 72, 828, 1128), outline="black", width=4)
+    draw.text((110, 130), "Rendered ColQwen PDF Smoke", fill="black")
+    draw.text((110, 210), "Mars ascent chart", fill="black")
+    draw.line((130, 820, 760, 360), fill="black", width=6)
+    draw.rectangle((130, 360, 760, 820), outline="gray", width=2)
+    draw.text((110, 900), "Thermal margin notes and Artemis mission control evidence.", fill="black")
+    image.save(path, "PDF", resolution=144)
     return path
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import httpx
 import numpy as np
 
 from .embeddings import FeatureHashEmbedder, mean_pool, normalize
@@ -196,6 +197,8 @@ class MlxColQwenEmbedder(FeatureHashEmbedder):
         self._model = None
         self._processor = None
         self._cache_cls = None
+        self._image_processor = None
+        self._http = httpx.Client(timeout=20, follow_redirects=True)
 
     def _load_model(self) -> None:
         if self._model is not None:
@@ -203,6 +206,7 @@ class MlxColQwenEmbedder(FeatureHashEmbedder):
         try:
             from mlx_embeddings import load
             from mlx_vlm.models.qwen2_5_vl.language import KVCache
+            from transformers import AutoImageProcessor
         except Exception as exc:
             raise MlxEmbedderError(
                 "ColQwen MLX dependencies are missing. Run with Python 3.12 and `uv sync --extra mlx`."
@@ -210,6 +214,7 @@ class MlxColQwenEmbedder(FeatureHashEmbedder):
         try:
             self._model, self._processor = load(self.model_name)
             self._cache_cls = KVCache
+            self._image_processor = AutoImageProcessor.from_pretrained(self.model_name, trust_remote_code=True)
         except Exception as exc:
             raise MlxEmbedderError(f"Failed to load MLX ColQwen model {self.model_name}: {exc}") from exc
 
@@ -222,7 +227,11 @@ class MlxColQwenEmbedder(FeatureHashEmbedder):
     def embed_patches(self, patches: list[Patch]) -> list[list[float]]:
         vectors: list[list[float]] = []
         for patch in patches:
-            vectors.extend(self._encode_token_vectors(patch.text or ""))
+            image = self._patch_image(patch)
+            if image is not None:
+                vectors.extend(self._encode_image_token_vectors(image, patch.text or ""))
+            else:
+                vectors.extend(self._encode_token_vectors(patch.text or ""))
             if len(vectors) >= self.max_patch_vectors:
                 break
         return vectors[: self.max_patch_vectors] or super().embed_patches(patches)
@@ -247,6 +256,87 @@ class MlxColQwenEmbedder(FeatureHashEmbedder):
             return [_fit_dimension(row, self.dimension) for row in rows if np.linalg.norm(row) > 1e-8]
         except Exception as exc:
             raise MlxEmbedderError(f"Failed to encode ColQwen vectors with {self.model_name}: {exc}") from exc
+
+    def _encode_image_token_vectors(self, image: Any, text: str) -> list[list[float]]:
+        self._load_model()
+        try:
+            import mlx.core as mx
+
+            image_inputs = self._image_processor(images=[image], return_tensors="np")
+            image_grid = image_inputs["image_grid_thw"]
+            image_tokens = self._image_token_count(image_grid[0])
+            prompt = "<|vision_start|>" + "<|image_pad|>" * image_tokens + f"<|vision_end|> {text}"
+            text_inputs = self._processor(text=[prompt], return_tensors="np", padding=True)
+            inputs = {**text_inputs, **image_inputs}
+            inputs = {key: mx.array(value) if not isinstance(value, mx.array) else value for key, value in inputs.items()}
+            cache = [self._cache_cls() for _ in range(len(self._model.vlm.language_model.model.layers))]
+            out = self._model(**inputs, cache=cache)
+            embeddings = getattr(out, "image_embeds", None)
+            if embeddings is None:
+                embeddings = getattr(out, "text_embeds", out)
+            mx.eval(embeddings)
+            rows = _as_numpy_rows(embeddings)
+            if rows.ndim == 3:
+                rows = rows.reshape(-1, rows.shape[-1])
+            return [_fit_dimension(row, self.dimension) for row in rows if np.linalg.norm(row) > 1e-8]
+        except Exception as exc:
+            raise MlxEmbedderError(f"Failed to encode ColQwen image vectors with {self.model_name}: {exc}") from exc
+
+    def _image_token_count(self, image_grid: Any) -> int:
+        t, h, w = [int(value) for value in image_grid]
+        merge = int(getattr(self._model.vlm.vision_tower, "spatial_merge_size", 2))
+        return max(1, (h // merge) * (w // merge) * t)
+
+    def _patch_image(self, patch: Patch) -> Any | None:
+        value = patch.asset_url or patch.source_file
+        if not value:
+            return None
+        try:
+            if patch.kind.startswith("pdf"):
+                return self._render_pdf_page(value, max(0, (patch.page or 1) - 1))
+            if patch.kind.startswith(("visual", "video")):
+                return self._load_image(value)
+        except Exception:
+            return None
+        return None
+
+    def _load_image(self, value: str) -> Any:
+        from PIL import Image
+
+        if value.startswith(("http://", "https://")):
+            import io
+
+            response = self._http.get(value)
+            response.raise_for_status()
+            return Image.open(io.BytesIO(response.content)).convert("RGB")
+        path = Path(value.removeprefix("file://")).expanduser()
+        return Image.open(path).convert("RGB")
+
+    def _render_pdf_page(self, value: str, page_index: int) -> Any:
+        import tempfile
+
+        import pypdfium2 as pdfium
+
+        pdf_bytes = self._bytes(value)
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            handle.write(pdf_bytes)
+            handle.flush()
+            pdf = pdfium.PdfDocument(handle.name)
+            if len(pdf) == 0:
+                raise MlxEmbedderError("PDF has no pages")
+            page = pdf[min(page_index, len(pdf) - 1)]
+            image = page.render(scale=1.35).to_pil().convert("RGB")
+            page.close()
+            pdf.close()
+        return image
+
+    def _bytes(self, value: str) -> bytes:
+        if value.startswith(("http://", "https://")):
+            response = self._http.get(value)
+            response.raise_for_status()
+            return response.content
+        path = Path(value.removeprefix("file://")).expanduser()
+        return path.read_bytes()
 
 
 def _with_image_token(text: str) -> str:
