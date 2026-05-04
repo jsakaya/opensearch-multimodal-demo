@@ -41,6 +41,7 @@ class SearchHit:
     doc: dict[str, Any]
     excerpt: str
     components: dict[str, float]
+    evidence: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +50,7 @@ class SearchHit:
             "score": self.score,
             "method": self.method,
             "excerpt": self.excerpt,
+            "evidence": self.evidence or [],
             "components": self.components,
             "source": self.doc.get("source"),
             "source_id": self.doc.get("source_id"),
@@ -119,6 +121,7 @@ def rrf_fuse(result_lists: list[list[SearchHit]], top_k: int, k: int = 60) -> li
                 doc=hit.doc,
                 excerpt=hit.excerpt,
                 components=components.get(doc_id, {}),
+                evidence=hit.evidence,
             )
         )
     return fused
@@ -274,6 +277,7 @@ class LocalRetriever:
         hits: list[SearchHit] = []
         for rank, (score, candidate) in enumerate(scored[:top_k], start=1):
             doc = candidate.doc
+            evidence = rank_evidence(query, doc)
             hits.append(
                 SearchHit(
                     doc_id=candidate.doc_id,
@@ -281,21 +285,24 @@ class LocalRetriever:
                     score=score,
                     method="lir",
                     doc=doc,
-                    excerpt=best_patch_excerpt(query, doc),
+                    excerpt=evidence[0]["text"] if evidence else best_patch_excerpt(query, doc),
                     components={**candidate.components, "late_interaction": score},
+                    evidence=evidence,
                 )
             )
         return hits
 
     def _result(self, doc: dict[str, Any], rank: int, score: float, method: str, query: str) -> SearchHit:
+        evidence = rank_evidence(query, doc)
         return SearchHit(
             doc_id=str(doc.get("doc_id")),
             rank=rank,
             score=score,
             method=method,
             doc=doc,
-            excerpt=excerpt_for(query, doc.get("search_text") or doc.get("body") or doc.get("summary") or ""),
+            excerpt=evidence[0]["text"] if evidence else excerpt_for(query, doc.get("search_text") or doc.get("body") or doc.get("summary") or ""),
             components={method: score},
+            evidence=evidence,
         )
 
 
@@ -577,6 +584,7 @@ class OpenSearchRetriever:
         scored.sort(key=lambda item: item[0], reverse=True)
         hits: list[SearchHit] = []
         for rank, (score, candidate, doc) in enumerate(scored[:top_k], start=1):
+            evidence = rank_evidence(query, doc)
             hits.append(
                 SearchHit(
                     doc_id=candidate.doc_id,
@@ -584,8 +592,9 @@ class OpenSearchRetriever:
                     score=score,
                     method="lir",
                     doc=doc,
-                    excerpt=best_patch_excerpt(query, doc),
+                    excerpt=evidence[0]["text"] if evidence else best_patch_excerpt(query, doc),
                     components={**candidate.components, "late_interaction": score},
+                    evidence=evidence,
                 )
             )
         return hits
@@ -600,7 +609,17 @@ class OpenSearchRetriever:
         if not excerpt:
             excerpt = excerpt_for(query, source.get("search_text") or source.get("body") or source.get("summary") or "")
         score = float(hit.get("_score") or 0.0)
-        return SearchHit(str(source.get("doc_id") or hit.get("_id")), rank, score, method, source, excerpt, {method: score})
+        evidence = rank_evidence(query, source)
+        return SearchHit(
+            str(source.get("doc_id") or hit.get("_id")),
+            rank,
+            score,
+            method,
+            source,
+            evidence[0]["text"] if evidence else excerpt,
+            {method: score},
+            evidence,
+        )
 
 
 def make_retriever(settings: Settings, prefer_opensearch: bool = True) -> LocalRetriever | OpenSearchRetriever:
@@ -613,20 +632,96 @@ def make_retriever(settings: Settings, prefer_opensearch: bool = True) -> LocalR
 
 
 def best_patch_excerpt(query: str, doc: dict[str, Any]) -> str:
+    evidence = rank_evidence(query, doc, max_items=1)
+    if evidence:
+        item = evidence[0]
+        return f"{item.get('label') or item.get('kind') or 'evidence'}: {excerpt_for(query, item.get('text') or '')}"
+    return excerpt_for(query, doc.get("search_text") or doc.get("body") or doc.get("summary") or "")
+
+
+def rank_evidence(query: str, doc: dict[str, Any], max_items: int = 8) -> list[dict[str, Any]]:
     patches = doc.get("patches") or []
     if not patches:
-        return excerpt_for(query, doc.get("search_text") or doc.get("body") or doc.get("summary") or "")
-    query_terms = {term.lower() for term in query.split() if len(term) > 2}
-    best = max(
-        patches,
-        key=lambda patch: sum(1 for term in query_terms if term in str(patch.get("text") or "").lower()),
-    )
-    label = best.get("kind") or "patch"
-    if best.get("start_s") is not None and best.get("end_s") is not None:
-        label = f"{label} {int(float(best['start_s']))}-{int(float(best['end_s']))}s"
-    elif best.get("page") is not None:
-        label = f"{label} p{best['page']}"
-    return f"{label}: {excerpt_for(query, best.get('text') or '')}"
+        text = doc.get("search_text") or doc.get("body") or doc.get("summary") or ""
+        if not text:
+            return []
+        terms = _query_terms(query)
+        return [
+            {
+                "kind": "record",
+                "label": "record",
+                "loc": "record",
+                "text": excerpt_for(query, text, width=520),
+                "score": _term_score(terms, text),
+                "matched_terms": _matched_terms(terms, text),
+            }
+        ]
+    terms = _query_terms(query)
+    scored: list[tuple[float, int, int, dict[str, Any]]] = []
+    for index, patch in enumerate(patches):
+        text = str(patch.get("text") or "")
+        if not text:
+            continue
+        score = _term_score(terms, text)
+        scored.append((score, _patch_priority(patch), -index, _evidence_item(query, patch, score, terms)))
+    scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [item for _score, _priority, _index, item in scored[:max_items]]
+
+
+def _evidence_item(query: str, patch: dict[str, Any], score: float, terms: set[str]) -> dict[str, Any]:
+    loc = _patch_loc(patch)
+    text = str(patch.get("text") or "")
+    return {
+        "patch_id": patch.get("patch_id"),
+        "kind": patch.get("kind") or "patch",
+        "label": f"{patch.get('kind') or 'patch'} {loc}".strip(),
+        "loc": loc,
+        "text": excerpt_for(query, text, width=520),
+        "score": round(float(score), 4),
+        "matched_terms": _matched_terms(terms, text),
+        "page": patch.get("page"),
+        "start_s": patch.get("start_s"),
+        "end_s": patch.get("end_s"),
+        "asset_url": patch.get("asset_url") or patch.get("source_file") or "",
+    }
+
+
+def _patch_loc(patch: dict[str, Any]) -> str:
+    if patch.get("start_s") is not None and patch.get("end_s") is not None:
+        return f"{int(float(patch['start_s']))}-{int(float(patch['end_s']))}s"
+    if patch.get("page") is not None:
+        return f"p{patch['page']}"
+    return f"#{int(patch.get('ordinal') or 0) + 1}"
+
+
+def _patch_priority(patch: dict[str, Any]) -> int:
+    kind = str(patch.get("kind") or "")
+    if patch.get("start_s") is not None or kind.startswith(("pdf", "table", "video", "audio_transcript")):
+        return 2
+    if kind in {"record_header", "visual_caption", "audio_caption"}:
+        return 0
+    return 1
+
+
+def _query_terms(query: str) -> set[str]:
+    return {term.strip().lower() for term in query.split() if len(term.strip()) > 2}
+
+
+def _matched_terms(terms: set[str], text: str) -> list[str]:
+    lowered = text.lower()
+    return sorted(term for term in terms if term in lowered)
+
+
+def _term_score(terms: set[str], text: str) -> float:
+    if not terms:
+        return 0.0
+    lowered = text.lower()
+    score = 0.0
+    for term in terms:
+        count = lowered.count(term)
+        if count:
+            score += 1.0 + min(count, 5) * 0.25
+    return score
 
 
 def _late_vector_field(backend: str) -> str:

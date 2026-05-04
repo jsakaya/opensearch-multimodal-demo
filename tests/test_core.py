@@ -121,6 +121,28 @@ def test_patch_vectors_drive_late_interaction(tmp_path) -> None:
     response = LocalRetriever(settings).search("glacier albedo", mode="lir")
     assert response.hits[0].doc_id == "pdf-1"
     assert response.hits[0].method == "lir"
+    payload = response.hits[0].to_dict()
+    assert payload["evidence"]
+    assert payload["evidence"][0]["loc"].startswith("p")
+    assert {"glacier", "albedo"}.issubset(set(payload["evidence"][0]["matched_terms"]))
+
+
+def test_video_hits_expose_time_window_evidence(tmp_path) -> None:
+    settings = replace(
+        Settings(),
+        docs_path=tmp_path / "docs.jsonl",
+        embedded_docs_path=tmp_path / "embedded.jsonl",
+        vector_dim=64,
+    )
+    embedder = FeatureHashEmbedder(settings.vector_dim)
+    record = make_record("video-evidence", "Mission control video", "Launch schedule and inventory briefing.", "video")
+    record.assets = [Asset(kind="video", url="https://example.test/clip.mp4", duration_s=65)]
+    indexed = prepare_record(record, embedder)
+    write_jsonl(settings.embedded_docs_path, [indexed.model_dump(mode="json")])
+    payload = LocalRetriever(settings).search("schedule inventory", mode="keyword").hits[0].to_dict()
+    assert payload["evidence"]
+    assert payload["evidence"][0]["start_s"] is not None
+    assert "schedule" in payload["evidence"][0]["matched_terms"]
 
 
 def test_inline_ingest_request_becomes_stable_record() -> None:

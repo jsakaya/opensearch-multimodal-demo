@@ -4,6 +4,7 @@ const state = {
   activeId: null,
   modality: "",
   source: "",
+  query: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -30,6 +31,33 @@ function firstThumb(hit) {
 function score(value) {
   const n = Number(value || 0);
   return n >= 10 ? n.toFixed(2) : n.toFixed(4);
+}
+
+function regexEsc(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function highlightTerms(text, terms) {
+  let safe = esc(text);
+  const unique = [...new Set((terms || []).filter((term) => String(term).length > 2))].sort((a, b) => b.length - a.length);
+  unique.forEach((term) => {
+    safe = safe.replace(new RegExp(`(${regexEsc(esc(term))})`, "gi"), "<mark>$1</mark>");
+  });
+  return safe;
+}
+
+function evidenceFor(hit) {
+  const evidence = hit.evidence || [];
+  if (evidence.length) return evidence;
+  return (hit.patches || []).slice(0, 8).map((patch) => ({
+    kind: patch.kind || "patch",
+    label: patch.kind || "patch",
+    loc: patch.start_s !== null && patch.start_s !== undefined
+      ? `${Math.round(Number(patch.start_s))}-${Math.round(Number(patch.end_s || 0))}s`
+      : patch.page ? `p${patch.page}` : `#${Number(patch.ordinal || 0) + 1}`,
+    text: patch.text || "",
+    matched_terms: [],
+  }));
 }
 
 function showToast(message) {
@@ -112,6 +140,7 @@ async function runSearch() {
 
 function renderSearch(payload) {
   state.hits = payload.hits || [];
+  state.query = payload.query || "";
   $("retrieverName").textContent = compact(payload.retriever);
   $("latencyValue").textContent = `${Number(payload.latency_ms || 0).toFixed(1)} ms`;
   $("hitCount").textContent = String(payload.total || state.hits.length);
@@ -160,6 +189,7 @@ function renderResults() {
     card.className = `result-card ${state.activeId === hit.doc_id ? "is-active" : ""}`;
     card.dataset.modality = hit.modality || "document";
     const thumb = firstThumb(hit);
+    const evidence = evidenceFor(hit)[0];
     const patchLabel = hit.patch_vector_count && hit.patch_vector_count > hit.patch_count
       ? `${hit.patch_count} patches · ${hit.patch_vector_count} vectors`
       : hit.patch_count ? `${hit.patch_count} patches` : "single vector";
@@ -169,7 +199,7 @@ function renderResults() {
         <h2 class="result-title">${esc(hit.title)}</h2>
         <div class="result-meta">${esc(hit.modality)} &middot; ${esc(hit.source)} &middot; ${esc(patchLabel)}</div>
         <div class="score-line">${esc(hit.method)} ${score(hit.score)}</div>
-        <p class="result-summary">${esc(hit.excerpt || hit.summary)}</p>
+        <p class="result-summary">${highlightTerms((evidence && evidence.text) || hit.excerpt || hit.summary, evidence?.matched_terms || [])}</p>
       </div>
       ${
         thumb
@@ -198,16 +228,21 @@ function renderDetail(hit) {
     .map(([key, value]) => `<div class="kv-row"><div class="kv-key">${esc(key)}</div><div class="kv-value">${esc(value)}</div></div>`)
     .join("");
   const tags = (hit.tags || []).slice(0, 10).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("");
-  const patches = (hit.patches || [])
+  const evidence = evidenceFor(hit)
     .slice(0, 10)
-    .map((patch) => {
-      const loc =
-        patch.start_s !== null && patch.start_s !== undefined
-          ? `${Math.round(Number(patch.start_s))}-${Math.round(Number(patch.end_s || 0))}s`
-          : patch.page
-            ? `p${patch.page}`
-            : `#${Number(patch.ordinal || 0) + 1}`;
-      return `<div class="patch-row"><span>${esc(loc)}</span><strong>${esc(patch.kind)}</strong><p>${esc(patch.text)}</p></div>`;
+    .map((item) => {
+      const terms = item.matched_terms || [];
+      const termBadges = terms.map((term) => `<span>${esc(term)}</span>`).join("");
+      return `
+        <div class="evidence-row" data-kind="${esc(item.kind || "patch")}">
+          <div class="evidence-loc">${esc(item.loc || "")}</div>
+          <div class="evidence-copy">
+            <strong>${esc(item.kind || "patch")}</strong>
+            <p>${highlightTerms(item.text || "", terms)}</p>
+            ${termBadges ? `<div class="evidence-terms">${termBadges}</div>` : ""}
+          </div>
+        </div>
+      `;
     })
     .join("");
   pane.innerHTML = `
@@ -227,7 +262,7 @@ function renderDetail(hit) {
         ? `<a href="${esc(hit.source_url)}" target="_blank" rel="noreferrer">Open source record</a>`
         : ""
     }
-    ${patches ? `<div class="patch-list">${patches}</div>` : ""}
+    ${evidence ? `<div class="evidence-title">Evidence trail</div><div class="evidence-list">${evidence}</div>` : ""}
     ${rows ? `<div class="kv-list">${rows}</div>` : ""}
   `;
 }
