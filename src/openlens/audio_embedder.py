@@ -14,6 +14,11 @@ class ClapAudioEmbedderError(RuntimeError):
     pass
 
 
+def _pooled_feature_tensor(output):
+    pooled = getattr(output, "pooler_output", None)
+    return pooled if pooled is not None else output
+
+
 class ClapAudioEmbedder(FeatureHashEmbedder):
     """Audio-native CLAP provider for speech, music, and environmental sound retrieval."""
 
@@ -47,7 +52,7 @@ class ClapAudioEmbedder(FeatureHashEmbedder):
             dtype = torch.float16
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             device = "mps"
-            dtype = torch.float16
+            dtype = torch.float32
         else:
             device = "cpu"
             dtype = torch.float32
@@ -71,7 +76,7 @@ class ClapAudioEmbedder(FeatureHashEmbedder):
         inputs = self._processor(text=[text], return_tensors="pt", padding=True)
         inputs = {key: value.to(self._device) for key, value in inputs.items()}
         with torch.no_grad():
-            embeddings = self._model.get_text_features(**inputs)
+            embeddings = _pooled_feature_tensor(self._model.get_text_features(**inputs))
             embeddings = F.normalize(embeddings, p=2, dim=-1)
         return embeddings[0].detach().cpu().float().tolist()[: self.dimension]
 
@@ -92,10 +97,10 @@ class ClapAudioEmbedder(FeatureHashEmbedder):
         import torch.nn.functional as F
 
         waveform, sampling_rate = self._load_audio(value)
-        inputs = self._processor(audios=waveform, sampling_rate=sampling_rate, return_tensors="pt")
+        inputs = self._processor(audio=waveform, sampling_rate=sampling_rate, return_tensors="pt")
         inputs = {key: value.to(self._device) for key, value in inputs.items()}
         with torch.no_grad():
-            embeddings = self._model.get_audio_features(**inputs)
+            embeddings = _pooled_feature_tensor(self._model.get_audio_features(**inputs))
             embeddings = F.normalize(embeddings, p=2, dim=-1)
         return embeddings[0].detach().cpu().float().tolist()[: self.dimension]
 

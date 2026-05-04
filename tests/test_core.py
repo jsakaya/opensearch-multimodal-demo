@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
+from openlens.audio_embedder import _pooled_feature_tensor
 from openlens.config import Settings
 from openlens.api import InlineIngestRequest, inline_request_to_record
 from openlens.data import write_jsonl
@@ -210,6 +212,12 @@ def test_mlx_colqwen_backend_defaults_to_late_interaction_dimension(monkeypatch)
 def test_mlx_runtime_status_is_nonfatal_without_extra() -> None:
     status = mlx_runtime_status()
     assert "available" in status
+
+
+def test_clap_feature_output_accepts_transformers_pooler_output() -> None:
+    payload = object()
+    assert _pooled_feature_tensor(SimpleNamespace(pooler_output=payload)) is payload
+    assert _pooled_feature_tensor(payload) is payload
 
 
 def test_modality_router_populates_video_audio_pdf_table_fields() -> None:
