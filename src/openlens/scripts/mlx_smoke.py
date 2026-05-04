@@ -3,12 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from dataclasses import replace
 from pathlib import Path
 
+from openlens.config import get_settings
 from openlens.data import write_jsonl
-from openlens.indexer import prepare_record
+from openlens.indexer import bulk_index, check_status, make_client, prepare_record, recreate_index
 from openlens.mlx_embedder import MlxColQwenEmbedder, MlxQwenVlEmbedder, MlxTextEmbedder, mlx_runtime_status
 from openlens.models import Asset, OpenRecord
+from openlens.retrieval import OpenSearchRetriever
 
 
 def main() -> int:
@@ -18,6 +21,9 @@ def main() -> int:
     parser.add_argument("--colqwen-model", default="qnguyen3/colqwen2_5-v0.2-mlx-4bit")
     parser.add_argument("--skip-qwen-vl", action="store_true")
     parser.add_argument("--skip-colqwen", action="store_true")
+    parser.add_argument("--index-colqwen", action="store_true")
+    parser.add_argument("--colqwen-index", default="openlens_mlx_colqwen_smoke")
+    parser.add_argument("--no-recreate", action="store_true")
     parser.add_argument("--output", default="data/processed/mlx_smoke_embedded.jsonl")
     args = parser.parse_args()
 
@@ -64,6 +70,7 @@ def main() -> int:
         qwen_vl_shape = [len(indexed_image.vector)]
 
     colqwen_vectors = 0
+    indexed_pdf = None
     if not args.skip_colqwen:
         colqwen = MlxColQwenEmbedder(model_name=args.colqwen_model, dimension=128)
         pdf_path = _make_smoke_pdf()
@@ -86,6 +93,45 @@ def main() -> int:
 
     output = Path(args.output)
     write_jsonl(output, rows)
+    opensearch_colqwen: dict[str, object] = {"indexed": False}
+    if args.index_colqwen:
+        if indexed_pdf is None:
+            raise SystemExit("--index-colqwen needs ColQwen enabled.")
+        settings = replace(
+            get_settings(),
+            opensearch_index=args.colqwen_index,
+            embedding_backend="mlx-colqwen",
+            vector_dim=128,
+            require_opensearch=True,
+        )
+        status = check_status(settings)
+        if not status.available:
+            raise SystemExit(f"OpenSearch unavailable: {status.detail}")
+        client = make_client(settings)
+        if not args.no_recreate:
+            recreate_index(client, args.colqwen_index, settings.vector_dim)
+        count = bulk_index(client, args.colqwen_index, [indexed_pdf], refresh="wait_for")
+        response = OpenSearchRetriever(settings).search(
+            "Mars ascent thermal margin chart",
+            mode="lir",
+            top_k=1,
+            candidate_k=5,
+            modality="pdf",
+        )
+        first = response.hits[0].to_dict() if response.hits else {}
+        opensearch_colqwen = {
+            "indexed": True,
+            "index": args.colqwen_index,
+            "indexed_count": count,
+            "retriever": response.retriever,
+            "mode": response.mode,
+            "top_doc_id": first.get("doc_id", ""),
+            "top_title": first.get("title", ""),
+            "top_score": first.get("score", 0.0),
+            "top_embedding_backend": first.get("embedding_backend", ""),
+            "top_patch_vector_count": first.get("patch_vector_count", 0),
+            "evidence": first.get("evidence", [])[:2],
+        }
     payload = {
         "ok": True,
         "runtime": mlx_runtime_status(),
@@ -95,6 +141,7 @@ def main() -> int:
         "qwen_vl_vector_dim": qwen_vl_shape[0] if qwen_vl_shape else 0,
         "colqwen_model": "" if args.skip_colqwen else args.colqwen_model,
         "colqwen_patch_vectors": colqwen_vectors,
+        "opensearch_colqwen": opensearch_colqwen,
         "records": len(rows),
         "output": str(output),
         "elapsed_s": round(time.perf_counter() - started, 2),
